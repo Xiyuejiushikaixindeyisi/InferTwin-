@@ -1,0 +1,16 @@
+# Placeholder template for future Ramulator2 KV restore experiments.
+# The concrete adapter should render request-specific memory traffic into a
+# temporary Ramulator2 config derived from this file.
+
+MemorySystem:
+  impl: GenericDRAM
+
+DRAM:
+  impl: DDR5
+
+Controller:
+  impl: Generic
+
+AddrMapper:
+  impl: RoBaRaCoCh
+

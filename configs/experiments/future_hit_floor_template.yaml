@@ -1,0 +1,48 @@
+# Future template only. HitFloor Step1-Step5 does not implement hit floor search,
+# DDR/SSD tiers, or KV load latency. Do not use this file as a runnable config.
+
+experiment:
+  name: future_hit_floor_search
+  description: Future P90 TTFT target sweep template.
+
+simulation:
+  mode: hit_floor_search
+
+trace:
+  path: data/samples/sample_trace.csv
+
+tokenizers:
+  root: tokenizers
+  default_profile: glm-v5
+  cache_scope: tenant_isolated
+
+targets:
+  p90_ttft_ms: [500, 800, 1000, 1500]
+
+cache_search:
+  block_size_tokens: 16
+  hbm_capacity_blocks: [1024, 2048, 4096, 8192]
+  ddr_capacity_blocks: []
+  eviction_policy: lru
+
+scheduler:
+  policy: fcfs
+  max_num_batched_tokens: 8192
+  max_num_seqs: 32
+  enable_chunked_prefill: true
+  long_prefill_token_threshold: 4096
+
+latency:
+  backend: fitted_ttft
+  model_name: glm-v5
+  hardware_name: ascend910c
+  fitted_ttft:
+    profile: glm-v5_ascend910c_default
+    function: token_linear_v1
+    intercept_ms: 0.0
+    ms_per_uncached_token: 0.02
+    calibrated_from: manual_default
+
+output:
+  directory: reports/future_hit_floor_search
+  hit_floor_table: reports/future_hit_floor_search/hit_floor.csv

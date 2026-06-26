@@ -1,0 +1,19 @@
+aiconfigurator:
+  enabled: false
+  executable: /path/to/aiconfigurator
+  working_dir: /path/to/aiconfigurator/project
+  timeout_seconds: 300
+
+mksim:
+  enabled: false
+  executable: /path/to/mksim
+  working_dir: /path/to/mksim/project
+  timeout_seconds: 300
+
+ramulator2:
+  enabled: false
+  executable: /path/to/ramulator2
+  working_dir: /path/to/ramulator2/project
+  config_template: configs/backends/ramulator2_template.yaml
+  timeout_seconds: 300
+

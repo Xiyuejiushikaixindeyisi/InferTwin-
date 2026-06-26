@@ -1,0 +1,49 @@
+experiment:
+  name: step6_capacity_sweep
+  description: HBM cache capacity sweep report.
+
+simulation:
+  mode: capacity_sweep
+
+trace:
+  path: data/samples/sample_trace.csv
+  time_column: service_start_time
+  instance_column: instance_uuid
+  request_params_column: request_params
+
+tokenizers:
+  root: tokenizers
+  default_profile: glm-v5
+  cache_scope: tenant_isolated
+
+cache:
+  block_size_tokens: 16
+  policy: hbm
+  eviction_policy: lru
+
+sweep:
+  hbm_capacity_blocks: [512, 1024, 2048]
+  parallel_instances: false
+
+scheduler:
+  policy: fcfs
+  max_num_batched_tokens: 8192
+  max_num_seqs: 32
+  enable_chunked_prefill: true
+  long_prefill_token_threshold: 4096
+
+latency:
+  backend: fitted_ttft
+  model_name: glm-v5
+  hardware_name: ascend910c
+  fitted_ttft:
+    profile: glm-v5_ascend910c_default
+    function: token_linear_v1
+    intercept_ms: 0.0
+    ms_per_uncached_token: 0.02
+    calibrated_from: manual_default
+
+output:
+  directory: reports/step6_capacity_sweep
+  cache_events: false
+  cache_event_capacities: []

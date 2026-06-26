@@ -1,0 +1,8 @@
+hardware:
+  name: example-gpu-node
+  gpu_type: H100
+  gpu_count: 8
+  hbm_bandwidth_gbps: 3350
+  ddr_bandwidth_gbps: 400
+  interconnect: nvlink
+

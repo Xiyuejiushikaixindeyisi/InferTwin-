@@ -1,0 +1,11 @@
+tokenizer:
+  profile: glm-v5
+  type: huggingface
+  tokenizer_path: .
+  chat_template: chat_template.jinja
+  include_tools: true
+  model_aliases:
+    - glm-v5
+    - glm-v5-chat
+    - example-llm
+
