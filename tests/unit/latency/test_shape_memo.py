@@ -1,5 +1,5 @@
-from hitfloor.latency.memo import ShapeMemo
-from hitfloor.latency.schema import LatencyResult, ShapeKey
+from infertwin.latency.memo import ShapeMemo
+from infertwin.latency.schema import LatencyResult, ShapeKey
 
 
 def test_shape_memo_reuses_identical_shape() -> None:

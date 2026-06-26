@@ -1,5 +1,5 @@
-from hitfloor.cache.eviction import LRUEvictionPolicy, LRUEvictor
-from hitfloor.cache.hbm_lru import HBMBlockMeta
+from infertwin.cache.eviction import LRUEvictionPolicy, LRUEvictor
+from infertwin.cache.hbm_lru import HBMBlockMeta
 
 
 def test_lru_policy_selects_oldest_inserted_block() -> None:

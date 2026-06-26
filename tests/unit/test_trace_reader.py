@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from hitfloor.trace.reader import read_trace_csv
+from infertwin.trace.reader import read_trace_csv
 
 
 def test_read_sample_trace() -> None:

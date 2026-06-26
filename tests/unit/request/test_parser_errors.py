@@ -1,6 +1,6 @@
 import pytest
 
-from hitfloor.request.parser import parse_request_params
+from infertwin.request.parser import parse_request_params
 
 
 def test_parse_request_params_accepts_documented_schema() -> None:

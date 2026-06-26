@@ -1,7 +1,7 @@
-from hitfloor.scheduler.config import SchedulerConfig
-from hitfloor.scheduler.queue import WaitingQueue
-from hitfloor.scheduler.state import RequestState, RequestStatus
-from hitfloor.scheduler.vllm_like import VllmLikeBatchScheduler
+from infertwin.scheduler.config import SchedulerConfig
+from infertwin.scheduler.queue import WaitingQueue
+from infertwin.scheduler.state import RequestState, RequestStatus
+from infertwin.scheduler.vllm_like import VllmLikeBatchScheduler
 
 
 def test_fcfs_schedules_waiting_requests_by_arrival_seq() -> None:

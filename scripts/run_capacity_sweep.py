@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Run a HitFloor HBM capacity sweep from a config file."""
+"""Run a InferTwin HBM capacity sweep from a config file."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ def _ensure_src_path() -> None:
 
 def main(argv: list[str] | None = None) -> int:
     _ensure_src_path()
-    from hitfloor.cli.main import main as cli_main
+    from infertwin.cli.main import main as cli_main
 
     return cli_main(["sweep", *(sys.argv[1:] if argv is None else argv)])
 

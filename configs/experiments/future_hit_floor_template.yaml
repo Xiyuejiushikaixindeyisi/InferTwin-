@@ -1,4 +1,4 @@
-# Future template only. HitFloor Step1-Step5 does not implement hit floor search,
+# Future template only. InferTwin Step1-Step5 does not implement hit floor search,
 # DDR/SSD tiers, or KV load latency. Do not use this file as a runnable config.
 
 experiment:

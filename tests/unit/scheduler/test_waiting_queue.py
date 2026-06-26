@@ -1,7 +1,7 @@
 import pytest
 
-from hitfloor.scheduler.queue import WaitingQueue
-from hitfloor.scheduler.state import RequestState
+from infertwin.scheduler.queue import WaitingQueue
+from infertwin.scheduler.state import RequestState
 
 
 def test_waiting_queue_iterates_in_fifo_order() -> None:

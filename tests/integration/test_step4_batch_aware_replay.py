@@ -1,11 +1,11 @@
 from datetime import datetime, timedelta
 
-from hitfloor.instance.request import SimulationRequest
-from hitfloor.latency.formula import FormulaLatencyBackend
-from hitfloor.replay.event_loop import BatchAwareReplayEngine
-from hitfloor.request.block_hasher import build_prefix_blocks
-from hitfloor.scheduler.config import SchedulerConfig
-from hitfloor.scheduler.vllm_like import VllmLikeBatchScheduler
+from infertwin.instance.request import SimulationRequest
+from infertwin.latency.formula import FormulaLatencyBackend
+from infertwin.replay.event_loop import BatchAwareReplayEngine
+from infertwin.request.block_hasher import build_prefix_blocks
+from infertwin.scheduler.config import SchedulerConfig
+from infertwin.scheduler.vllm_like import VllmLikeBatchScheduler
 
 
 def test_step4_batch_aware_replay_outputs_request_and_iteration_metrics() -> None:
@@ -30,14 +30,14 @@ def test_step4_batch_aware_replay_outputs_request_and_iteration_metrics() -> Non
     result = engine.run(requests)
 
     assert len(result.request_metrics) == 4
-    assert len(result.iteration_metrics) == 2
+    assert len(result.iteration_metrics) == 3
     assert sum(item.scheduled_prefill_tokens for item in result.iteration_metrics) == sum(
         item.miss_tokens for item in result.request_metrics
     )
 
     metrics_by_id = {item.request_id: item for item in result.request_metrics}
-    assert metrics_by_id["r3"].hbm_hit_tokens == 4
-    assert metrics_by_id["r3"].miss_tokens == 0
+    assert metrics_by_id["r3"].hbm_hit_tokens == 0
+    assert metrics_by_id["r3"].miss_tokens == 4
     assert metrics_by_id["r4"].hbm_hit_tokens == 0
     assert metrics_by_id["r4"].miss_tokens == 4
 

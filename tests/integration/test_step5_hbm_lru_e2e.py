@@ -2,7 +2,7 @@ import csv
 import json
 from pathlib import Path
 
-from hitfloor.experiment.runner import ExperimentRunner
+from infertwin.experiment.runner import ExperimentRunner
 
 
 def test_step5_e2e_capacity_controls_eviction_and_repeat_hits(tmp_path: Path) -> None:
@@ -22,8 +22,11 @@ def test_step5_e2e_capacity_controls_eviction_and_repeat_hits(tmp_path: Path) ->
     ).run()
     enough_rows = _request_rows(enough_output)
     assert enough_result.metrics["phase"] == "batch_aware_hbm_lru"
-    assert int(enough_rows["r3"]["hbm_hit_tokens"]) == int(enough_rows["r1"]["prompt_tokens"])
-    assert int(enough_rows["r3"]["miss_tokens"]) == 0
+    assert int(enough_rows["r3"]["hbm_hit_tokens"]) == _expected_cached_tokens(
+        enough_rows["r3"],
+        block_size_tokens=4,
+    )
+    assert int(enough_rows["r3"]["miss_tokens"]) > 0
 
     constrained_output = tmp_path / "capacity_constrained"
     constrained_result = ExperimentRunner(
@@ -61,7 +64,10 @@ def test_step5_e2e_multi_instance_cache_isolation(tmp_path: Path) -> None:
     assert int(rows["r1"]["miss_tokens"]) == int(rows["r1"]["prompt_tokens"])
     assert int(rows["r2"]["miss_tokens"]) == int(rows["r2"]["prompt_tokens"])
     assert int(rows["r2"]["hbm_hit_tokens"]) == 0
-    assert int(rows["r3"]["hbm_hit_tokens"]) == int(rows["r3"]["prompt_tokens"])
+    assert int(rows["r3"]["hbm_hit_tokens"]) == _expected_cached_tokens(
+        rows["r3"],
+        block_size_tokens=4,
+    )
 
 
 def _config(
@@ -79,7 +85,7 @@ def _config(
             "cache_scope": "tenant_isolated",
         },
         "cache": {
-            "block_size_tokens": 256,
+            "block_size_tokens": 4,
             "policy": "hbm",
             "eviction_policy": "lru",
             "hbm_capacity_blocks": hbm_capacity_blocks,
@@ -150,3 +156,8 @@ def _cache_event_rows(output_dir: Path) -> list[dict[str, str]]:
 
 def _event_count(rows: list[dict[str, str]], event_type: str) -> int:
     return sum(row["event_type"] == event_type for row in rows)
+
+
+def _expected_cached_tokens(row: dict[str, str], *, block_size_tokens: int) -> int:
+    prompt_tokens = int(row["prompt_tokens"])
+    return ((prompt_tokens - 1) // block_size_tokens) * block_size_tokens

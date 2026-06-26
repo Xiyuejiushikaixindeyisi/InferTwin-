@@ -1,17 +1,17 @@
-# HitFloor Simulator Integration Guide
+# InferTwin Simulator Integration Guide
 
-本文档面向需要了解 HitFloor、或准备把 AIConfigurator / Markov-Infer-Sim 接入 HitFloor 的同事。
+本文档面向需要了解 InferTwin、或准备把 AIConfigurator / Markov-Infer-Sim 接入 InferTwin 的同事。
 
 核心结论：
 
-- HitFloor 可以在不下载大型 TTFT 仿真器的情况下继续开发和测试。
+- InferTwin 可以在不下载大型 TTFT 仿真器的情况下继续开发和测试。
 - Batch D 默认使用拟合型 TTFT 函数 backend，即 `FittedTTFTLatencyBackend` / `fitted_ttft`。
 - AIConfigurator / Markov-Infer-Sim 后续优先作为拟合参数的标定来源，也可以作为高精度 latency backend 接入。
 - 外部仿真器不应改写 replay、scheduler、cache materialization 逻辑。
 
-## HitFloor 当前做什么
+## InferTwin 当前做什么
 
-HitFloor 是离线 KV cache hit-floor 仿真器。
+InferTwin 是离线 KV cache hit-floor 仿真器。
 
 它负责：
 
@@ -26,7 +26,7 @@ HitFloor 是离线 KV cache hit-floor 仿真器。
 9. 在 finish time 之后让新 cache block 可见。
 10. 输出 request 级 TTFT、scheduler wait、cache hit/miss 和 iteration 级 batch metrics。
 
-HitFloor 第一阶段不负责：
+InferTwin 第一阶段不负责：
 
 - 网关路由策略。
 - 实例侧真实排队策略。
@@ -37,7 +37,7 @@ HitFloor 第一阶段不负责：
 
 ## 不接大型 TTFT 仿真器时如何继续开发
 
-在没有 AIConfigurator / Markov-Infer-Sim 的情况下，HitFloor 仍然可以完整推进 Batch D 以及后续有限 HBM / DDR 前置代码。
+在没有 AIConfigurator / Markov-Infer-Sim 的情况下，InferTwin 仍然可以完整推进 Batch D 以及后续有限 HBM / DDR 前置代码。
 
 原因是 Step4 的核心不是某个外部 latency 数值，而是 replay 语义是否正确：
 
@@ -63,7 +63,7 @@ BatchShape -> duration_ms
 
    拟合型 TTFT backend 是确定性的轻量后端，适合单测、集成测试、E2E 验证和常规离线分析。它不运行真实算子级仿真，而是用一个由模型 / 硬件 / 部署方式标定出的函数快速给出 iteration duration。
 
-2. 先把 HitFloor 内部语义测准。
+2. 先把 InferTwin 内部语义测准。
 
    重点测试：
 
@@ -104,7 +104,7 @@ BatchShape -> duration_ms
 
 5. Batch D 可以先做 runner/report。
 
-   Runner/report 只消费 HitFloor 内部 metrics，不依赖外部仿真器。后续把 fitted TTFT backend 替换成 AIConfigurator / MkSim backend，或用 AIConfigurator / MkSim 重新标定 fitted profile 时，报告字段和 replay 结果口径应保持不变。
+   Runner/report 只消费 InferTwin 内部 metrics，不依赖外部仿真器。后续把 fitted TTFT backend 替换成 AIConfigurator / MkSim backend，或用 AIConfigurator / MkSim 重新标定 fitted profile 时，报告字段和 replay 结果口径应保持不变。
 
 ## 拟合型 TTFT 函数 backend
 
@@ -140,7 +140,7 @@ duration_ms = intercept_ms + ms_per_uncached_token * scheduled_prefill_tokens
 - `token_linear_v1` 不建模 queue time。
 - `token_linear_v1` 不建模 HBM / DDR KV load time。
 - `token_linear_v1` 不建模 decode TPOT 对 prefill 的干扰。
-- scheduler wait 仍由 HitFloor replay 产生，不由 fitted backend 伪造。
+- scheduler wait 仍由 InferTwin replay 产生，不由 fitted backend 伪造。
 - 100% prefix hit 请求仍走 zero-miss fast-finish，不产生新的 `ScheduledSlice`。
 
 默认配置示例：
@@ -167,13 +167,13 @@ external_simulator_v1
 
 ## 两种 TTFT 使用模式
 
-HitFloor 后续支持两种 latency 使用模式。
+InferTwin 后续支持两种 latency 使用模式。
 
 ### 快速拟合模式
 
 ```text
 trace
--> HitFloor replay
+-> InferTwin replay
 -> FittedTTFTLatencyBackend
 -> request_metrics.csv / iteration_metrics.csv / summary.md
 ```
@@ -189,7 +189,7 @@ trace
 
 ```text
 trace
--> HitFloor replay
+-> InferTwin replay
 -> AIConfigurator / MkSim backend
 -> request_metrics.csv / iteration_metrics.csv / summary.md
 ```
@@ -199,7 +199,7 @@ trace
 - 慢。
 - 接入成本更高。
 - 适合抽样校验、高精度分析、或为 fitted profile 生成标定数据。
-- 不应成为 HitFloor 基础开发和单测的硬依赖。
+- 不应成为 InferTwin 基础开发和单测的硬依赖。
 
 ### 推荐标定流程
 
@@ -208,7 +208,7 @@ AIConfigurator / MkSim / profiling
 -> 采样不同 scheduled_prefill_tokens / batch_size / context
 -> 拟合 intercept_ms 与 ms_per_uncached_token
 -> 生成 fitted_ttft profile yaml
--> HitFloor 快速 replay
+-> InferTwin 快速 replay
 ```
 
 第一版只要求得到 `token_linear_v1` 的两个参数：
@@ -224,7 +224,7 @@ ms_per_uncached_token
 
 - `batch_size` 是一个 scheduler iteration 内 request slice 数，不是 token 数。
 - `max_num_batched_tokens` 是 token budget，不是 batch size。
-- `BatchShape` 是 HitFloor scheduler output，不是 AIConfigurator / MkSim 的直接输入。
+- `BatchShape` 是 InferTwin scheduler output，不是 AIConfigurator / MkSim 的直接输入。
 - `ScheduledSlice` 表示一个请求在一个 iteration 中被调度的 prefill token slice。
 - `cached_prefix_tokens` 来自 prefix cache hit。
 - `previous_chunk_tokens` 来自同一请求此前 chunk 已完成的 token。
@@ -259,17 +259,17 @@ BatchAwareReplayEngine
 推荐新增代码边界：
 
 ```text
-src/hitfloor/latency/fitted_ttft.py           # default Batch D backend
-src/hitfloor/latency/simulator_schema.py      # simulator-neutral input schema
-src/hitfloor/latency/converter.py             # BatchShape -> SimulatorPrefillInput
-src/hitfloor/latency/aiconfigurator_backend.py
-src/hitfloor/latency/mksim_backend.py
+src/infertwin/latency/fitted_ttft.py           # default Batch D backend
+src/infertwin/latency/simulator_schema.py      # simulator-neutral input schema
+src/infertwin/latency/converter.py             # BatchShape -> SimulatorPrefillInput
+src/infertwin/latency/aiconfigurator_backend.py
+src/infertwin/latency/mksim_backend.py
 tests/unit/latency/test_simulator_converter.py
 tests/unit/latency/test_aiconfigurator_backend.py
 tests/unit/latency/test_mksim_backend.py
 ```
 
-现有 `src/hitfloor/external/` 可以保留为低层进程/API runner 边界。真正参与 Step4 replay 的 backend 应实现 `BatchLatencyBackend`。
+现有 `src/infertwin/external/` 可以保留为低层进程/API runner 边界。真正参与 Step4 replay 的 backend 应实现 `BatchLatencyBackend`。
 
 ## 建议的通用输入类型
 
@@ -311,7 +311,7 @@ isl = prefix_tokens + scheduled_prefill_tokens
 
 ## heterogeneous batch 转换策略
 
-HitFloor scheduler 可以产生 heterogeneous batch，例如同一 iteration 中不同请求的 `scheduled_prefill_tokens` 或 `computed_tokens_before` 不同。
+InferTwin scheduler 可以产生 heterogeneous batch，例如同一 iteration 中不同请求的 `scheduled_prefill_tokens` 或 `computed_tokens_before` 不同。
 
 AIConfigurator / MkSim 更偏向 uniform workload shape。因此 adapter 必须显式选择策略。
 
@@ -353,7 +353,7 @@ previous_chunk_tokens
 
 ## AIConfigurator 接入说明
 
-AIConfigurator 是公开的解析式 / data-driven LLM serving 性能模拟器。对 HitFloor 来说，它优先作为 fitted TTFT 参数的标定来源；在需要高精度重放时，也可以作为 compute latency backend 使用。
+AIConfigurator 是公开的解析式 / data-driven LLM serving 性能模拟器。对 InferTwin 来说，它优先作为 fitted TTFT 参数的标定来源；在需要高精度重放时，也可以作为 compute latency backend 使用。
 
 推荐 backend 名称：
 
@@ -391,11 +391,11 @@ osl = osl_for_ttft_backend
 
 注意事项：
 
-- HitFloor 已经逐 iteration 控制 chunked prefill，AIConfigurator adapter 第一版应采用 `iteration_controlled`。
+- InferTwin 已经逐 iteration 控制 chunked prefill，AIConfigurator adapter 第一版应采用 `iteration_controlled`。
 - 不要同时让 AIConfigurator 内部 IFB/chunking 再拆同一段 prefill，否则会双重建模。
 - 如果 AIConfigurator CLI 不能表达 `prefix`，优先使用其 Python API 或 lower-level runtime config。
 - 输出优先映射到 `LatencyResult.duration_ms`，细节写入 `LatencyResult.details`。
-- AIConfigurator 不负责 HitFloor 的 DDR KV load、cache policy、cache materialization。
+- AIConfigurator 不负责 InferTwin 的 DDR KV load、cache policy、cache materialization。
 
 最低测试要求：
 
@@ -407,7 +407,7 @@ osl = osl_for_ttft_backend
 
 ## Markov-Infer-Sim 接入说明
 
-Markov-Infer-Sim，简称 MkSim，是公司内算子级 roofline 性能仿真器。对 HitFloor 来说，它也优先作为 fitted TTFT 参数的标定来源；在需要高精度重放时，也可以作为 compute latency backend 使用。
+Markov-Infer-Sim，简称 MkSim，是公司内算子级 roofline 性能仿真器。对 InferTwin 来说，它也优先作为 fitted TTFT 参数的标定来源；在需要高精度重放时，也可以作为 compute latency backend 使用。
 
 推荐 backend 名称：
 
@@ -442,10 +442,10 @@ out_len = osl_for_ttft_backend
 
 注意事项：
 
-- MkSim 核心不内建 HitFloor 所需的 chunked prefill loop。
-- HitFloor 每个 scheduler iteration 应转换为一次或多次 MkSim prefill workload。
+- MkSim 核心不内建 InferTwin 所需的 chunked prefill loop。
+- InferTwin 每个 scheduler iteration 应转换为一次或多次 MkSim prefill workload。
 - MkSim 单次调用更适合 uniform workload shape。
-- MkSim 不单独建模 DDR KV load；DDR 命中加载时间应由 HitFloor 后续 DDR/Ramulator2 路径建模。
+- MkSim 不单独建模 DDR KV load；DDR 命中加载时间应由 InferTwin 后续 DDR/Ramulator2 路径建模。
 - 如果使用 CLI adapter，临时配置文件必须写在 adapter 工作目录中，并在日志中保留输入摘要。
 
 最低测试要求：
@@ -455,7 +455,7 @@ out_len = osl_for_ttft_backend
 - CLI/API 调用失败时暴露 stderr、config path 和 workload summary。
 - 不把 MkSim 的 `prefix_cache` 同时用来表达 DDR 命中。
 
-## 什么情况下 HitFloor 才算真正接入仿真器
+## 什么情况下 InferTwin 才算真正接入仿真器
 
 接入完成不是指能调用外部命令，而是满足以下条件：
 
@@ -464,12 +464,12 @@ out_len = osl_for_ttft_backend
 3. request metrics 字段不变。
 4. iteration metrics 中记录 backend、shape key、duration 和 conversion strategy。
 5. heterogeneous batch 处理策略显式写在 config 和输出中。
-6. 外部 simulator 失败时，HitFloor 明确失败或进入 config guard，不伪造 latency。
+6. 外部 simulator 失败时，InferTwin 明确失败或进入 config guard，不伪造 latency。
 7. 至少有一个小型 E2E fixture 能跑通：
 
 ```text
 trace.csv
--> HitFloor replay
+-> InferTwin replay
 -> external latency backend
 -> request_metrics.csv
 -> summary.md

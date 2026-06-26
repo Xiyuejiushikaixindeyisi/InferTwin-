@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Benchmark HitFloor replay state-machine throughput on synthetic requests."""
+"""Benchmark InferTwin replay state-machine throughput on synthetic requests."""
 
 from __future__ import annotations
 
@@ -84,8 +84,8 @@ def run_benchmark(config: BenchmarkConfig) -> dict[str, Any]:
 
 
 def build_synthetic_requests(config: BenchmarkConfig):
-    from hitfloor.instance.request import SimulationRequest
-    from hitfloor.request.block_hasher import build_prefix_blocks
+    from infertwin.instance.request import SimulationRequest
+    from infertwin.request.block_hasher import build_prefix_blocks
 
     base_time = datetime.fromisoformat("2026-06-05 09:01:23")
     requests: list[SimulationRequest] = []
@@ -119,11 +119,11 @@ def build_synthetic_requests(config: BenchmarkConfig):
 
 
 def _build_engine(config: BenchmarkConfig):
-    from hitfloor.cache.hbm_lru import HBMCache
-    from hitfloor.latency.formula import FormulaLatencyBackend
-    from hitfloor.replay.event_loop import BatchAwareReplayEngine
-    from hitfloor.scheduler.config import SchedulerConfig
-    from hitfloor.scheduler.vllm_like import VllmLikeBatchScheduler
+    from infertwin.cache.hbm_lru import HBMCache
+    from infertwin.latency.formula import FormulaLatencyBackend
+    from infertwin.replay.event_loop import BatchAwareReplayEngine
+    from infertwin.scheduler.config import SchedulerConfig
+    from infertwin.scheduler.vllm_like import VllmLikeBatchScheduler
 
     scheduler = VllmLikeBatchScheduler(
         SchedulerConfig(
@@ -157,7 +157,7 @@ def _build_cache_event_sink(config: BenchmarkConfig):
     if config.cache_events == "off":
         return None
     if config.cache_events == "memory":
-        from hitfloor.cache.event_sink import InMemoryCacheEventSink
+        from infertwin.cache.event_sink import InMemoryCacheEventSink
 
         return InMemoryCacheEventSink()
     raise ValueError(f"unsupported cache event mode: {config.cache_events}")
@@ -165,7 +165,7 @@ def _build_cache_event_sink(config: BenchmarkConfig):
 
 def _parse_args(argv: list[str] | None) -> BenchmarkConfig:
     parser = argparse.ArgumentParser(
-        description="Benchmark HitFloor replay state-machine throughput."
+        description="Benchmark InferTwin replay state-machine throughput."
     )
     parser.add_argument("--requests", type=int, default=10_000, dest="request_count")
     parser.add_argument("--instances", type=int, default=1, dest="instance_count")

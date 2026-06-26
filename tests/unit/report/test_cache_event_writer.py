@@ -1,8 +1,8 @@
 import csv
 from pathlib import Path
 
-from hitfloor.cache.events import LOOKUP_MISS, MATERIALIZE, CacheEvent
-from hitfloor.report.cache_events import CACHE_EVENT_FIELDNAMES, CsvCacheEventWriter
+from infertwin.cache.events import LOOKUP_MISS, MATERIALIZE, CacheEvent
+from infertwin.report.cache_events import CACHE_EVENT_FIELDNAMES, CsvCacheEventWriter
 
 
 def test_csv_cache_event_writer_writes_header_for_empty_events(tmp_path: Path) -> None:

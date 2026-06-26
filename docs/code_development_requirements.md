@@ -1,6 +1,6 @@
-# HitFloor 代码开发要求
+# InferTwin 代码开发要求
 
-本文档记录 HitFloor 后续开发必须遵守的代码质量、模块边界、测试与输出原则。
+本文档记录 InferTwin 后续开发必须遵守的代码质量、模块边界、测试与输出原则。
 
 ## 1. 优先写清晰代码，不写聪明代码
 
@@ -47,13 +47,13 @@ CLI 必须是：
 
 行数阈值是维护性信号，不是机械禁令。
 
-HitFloor 的 scheduler、replay、cache eviction 这类核心算法文件，本质上接近 vLLM/vLLM-Ascend 的调度状态机。参考本地代码：
+InferTwin 的 scheduler、replay、cache eviction 这类核心算法文件，本质上接近 vLLM/vLLM-Ascend 的调度状态机。参考本地代码：
 
 - `/home/zhangxiyue/vllm/vllm/v1/core/sched/scheduler.py` 约 2300 行。
 - `/home/zhangxiyue/vllm-ascend-kv-study/vllm-ascend/vllm_ascend/core/recompute_scheduler.py` 约 1000 行。
 - `/home/zhangxiyue/vllm/vllm/v1/worker/gpu/input_batch.py` 约 580 行。
 
-因此 HitFloor 不要求为了满足较小行数阈值而强行拆分核心状态机。拆分必须让职责更清楚、测试更容易，而不是只让文件变短。
+因此 InferTwin 不要求为了满足较小行数阈值而强行拆分核心状态机。拆分必须让职责更清楚、测试更容易，而不是只让文件变短。
 
 ### 文件规模建议
 

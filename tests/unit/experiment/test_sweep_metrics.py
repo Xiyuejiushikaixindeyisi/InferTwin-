@@ -1,7 +1,7 @@
 import pytest
 
-from hitfloor.cache.event_sink import CacheEventStats
-from hitfloor.experiment.sweep import (
+from infertwin.cache.event_sink import CacheEventStats
+from infertwin.experiment.sweep import (
     INSTANCE_SCOPE,
     TRACE_SCOPE,
     build_capacity_rows,
@@ -9,7 +9,7 @@ from hitfloor.experiment.sweep import (
     percentile,
     sort_capacity_rows,
 )
-from hitfloor.replay.metrics import BatchAwareRequestMetrics, IterationMetrics
+from infertwin.replay.metrics import BatchAwareRequestMetrics, IterationMetrics
 
 
 def test_build_capacity_rows_aggregates_trace_and_instances() -> None:

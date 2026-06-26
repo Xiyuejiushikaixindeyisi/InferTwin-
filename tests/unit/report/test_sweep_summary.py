@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from hitfloor.experiment.sweep import CapacitySweepResult, CapacitySweepRow
-from hitfloor.report.sweep import write_capacity_sweep_report
+from infertwin.experiment.sweep import CapacitySweepResult, CapacitySweepRow
+from infertwin.report.sweep import write_capacity_sweep_report
 
 
 def test_write_capacity_sweep_report_writes_csv_and_summary(tmp_path: Path) -> None:
@@ -30,7 +30,7 @@ def test_write_capacity_sweep_report_writes_csv_and_summary(tmp_path: Path) -> N
     assert "8,instance,instance-a" in csv_text
 
     summary = paths.summary_path.read_text(encoding="utf-8")
-    assert "HitFloor Capacity Sweep Summary" in summary
+    assert "InferTwin Capacity Sweep Summary" in summary
     assert "fitted_ttft" in summary
     assert "DDR / SSD cache hits are not modeled" in summary
     assert "P90 target matching / hit floor search is not performed" in summary

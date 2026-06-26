@@ -1,7 +1,7 @@
 import csv
 from pathlib import Path
 
-from hitfloor.experiment.runner import ExperimentRunner
+from infertwin.experiment.runner import ExperimentRunner
 
 
 def test_batch_d_runner_writes_batch_aware_reports(tmp_path: Path) -> None:

@@ -1,0 +1,9 @@
+instances:
+  name: local-fixed-route-example
+  items:
+    instance-a:
+      model_name: glm-v5.1
+      deployment: glm-v5.1-vllm-ascend-prefill
+    instance-b:
+      model_name: glm-v5.1
+      deployment: glm-v5.1-vllm-ascend-prefill

@@ -1,6 +1,6 @@
-from hitfloor.cache.events import EVICT, LOOKUP_MISS, MATERIALIZE
-from hitfloor.cache.hbm_lru import HBMCache
-from hitfloor.request.block_hasher import PrefixBlock
+from infertwin.cache.events import EVICT, LOOKUP_MISS, MATERIALIZE
+from infertwin.cache.hbm_lru import HBMCache
+from infertwin.request.block_hasher import PrefixBlock
 
 
 def test_hbm_cache_events_include_required_context_and_drain() -> None:

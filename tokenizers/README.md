@@ -1,6 +1,6 @@
 # Tokenizers
 
-HitFloor stores offline tokenizer profiles here. Each profile is selected by
+InferTwin stores offline tokenizer profiles here. Each profile is selected by
 the request `model` field through `manifest.yaml`.
 
 Production profiles should vendor tokenizer files only, never model weights.

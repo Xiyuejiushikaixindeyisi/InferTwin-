@@ -1,0 +1,26 @@
+deployment:
+  name: glm-v5.1-vllm-ascend-prefill
+  engine: vllm-ascend
+  scheduler:
+    max_num_seqs: 32
+    max_num_batched_tokens: 8192
+    enable_chunked_prefill: true
+    long_prefill_token_threshold: 4096
+  parallel:
+    tensor_parallel_size: 1
+    pipeline_parallel_size: 1
+    prefill_context_parallel_size: 1
+    decode_context_parallel_size: 1
+  speculative:
+    enabled: false
+  cache_features:
+    prefix_caching: true
+    multi_tier_cache: false
+    pooling: false
+    kv_transfer: false
+    runtime_block_size: 128
+  startup_args:
+    max_num_seqs: 32
+    max_model_len: 131072
+    max_num_batched_tokens: 8192
+    gpu_memory_utilization: 0.9

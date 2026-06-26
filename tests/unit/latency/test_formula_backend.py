@@ -1,5 +1,5 @@
-from hitfloor.latency.formula import FormulaLatencyBackend
-from hitfloor.scheduler.batch_shape import BatchShape, ScheduledSlice
+from infertwin.latency.formula import FormulaLatencyBackend
+from infertwin.scheduler.batch_shape import BatchShape, ScheduledSlice
 
 
 def test_formula_iteration_latency_increases_with_prefill_tokens() -> None:

@@ -1,5 +1,5 @@
-from hitfloor.latency.base import KVRestoreEstimateInput, PrefillEstimateInput
-from hitfloor.latency.formula import FormulaLatencyBackend
+from infertwin.latency.base import KVRestoreEstimateInput, PrefillEstimateInput
+from infertwin.latency.formula import FormulaLatencyBackend
 
 
 def test_formula_latency_backend_estimates_prefill_and_restore() -> None:

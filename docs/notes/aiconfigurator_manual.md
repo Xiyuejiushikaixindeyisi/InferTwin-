@@ -6,15 +6,15 @@
 
 AIConfigurator 是离线解析式 / data-driven LLM serving 性能模拟器和配置搜索器。它不跑真实推理，不需要 GPU/NPU，主要依赖预采集 kernel 性能表做插值和外推，输出 TTFT、TPOT、request latency、吞吐和功耗等指标。
 
-对 HitFloor Step4 来说，AIConfigurator 的定位是：
+对 InferTwin Step4 来说，AIConfigurator 的定位是：
 
 ```text
 fast prefill/decode compute latency backend with IFB/chunked-prefill awareness
 ```
 
-它可以作为 HitFloor 的 compute latency backend，但不负责：
+它可以作为 InferTwin 的 compute latency backend，但不负责：
 
-- HitFloor 请求 replay。
+- InferTwin 请求 replay。
 - KV block 命中生成、保活、淘汰。
 - DDR / host KV load。
 - prefix cache 物化时机。
@@ -81,7 +81,7 @@ print(
 )
 ```
 
-如果 HitFloor 只需要“给一个 shape，要一个延迟数字”，`cli_estimate` 是最接近的入口。
+如果 InferTwin 只需要“给一个 shape，要一个延迟数字”，`cli_estimate` 是最接近的入口。
 
 ## 调用方式
 
@@ -94,7 +94,7 @@ AIConfigurator 支持：
 | 配置文件 | 支持 | `exp` 模式吃 YAML |
 | HTTP | 非内置稳定 API | 可选 service extra，但不是本体默认接口 |
 
-HitFloor adapter 推荐优先使用 Python API，避免 shell/argparse/临时文件开销。replay core 不应 import AIConfigurator，只能依赖 HitFloor 自己定义的 latency backend protocol。
+InferTwin adapter 推荐优先使用 Python API，避免 shell/argparse/临时文件开销。replay core 不应 import AIConfigurator，只能依赖 InferTwin 自己定义的 latency backend protocol。
 
 ## Python API 关键信息
 
@@ -139,7 +139,7 @@ raw
 - `static_gen`: 纯 decode。
 - `static`: prefill + decode。
 
-对 HitFloor Step4，优先考虑：
+对 InferTwin Step4，优先考虑：
 
 ```text
 cli_estimate or InferenceSession.run_static(static_ctx)
@@ -181,7 +181,7 @@ cli_estimate or InferenceSession.run_static(static_ctx)
 - `pareto_frontier.png`
 - Dynamo 部署文件，例如 `agg_config.yaml`、`prefill_config.yaml`、`decode_config.yaml` 等。
 
-HitFloor 单点 latency adapter 不应依赖 deployment 产物，只需要读取 `EstimateResult.ttft` 或 lower-level summary 中的 context latency。
+InferTwin 单点 latency adapter 不应依赖 deployment 产物，只需要读取 `EstimateResult.ttft` 或 lower-level summary 中的 context latency。
 
 ## 多 shape 支持
 
@@ -191,7 +191,7 @@ HitFloor 单点 latency adapter 不应依赖 deployment 产物，只需要读取
 
 没有原生“一次传入一批 shape list”的接口。
 
-HitFloor 建议：
+InferTwin 建议：
 
 ```text
 ShapeMemo + 外层循环 cli_estimate / lower-level API
@@ -222,9 +222,9 @@ x = batch_size * effective_isl
 
 Decode 每步处理约 `batch_size` 个 token。
 
-### 对 HitFloor 的影响
+### 对 InferTwin 的影响
 
-HitFloor 当前 `BatchShape.batch_size = request slice 数` 与 AIConfigurator 的 request-level batch size 一致。
+InferTwin 当前 `BatchShape.batch_size = request slice 数` 与 AIConfigurator 的 request-level batch size 一致。
 
 但 AIConfigurator 假设 batch 内共享同一个：
 
@@ -286,15 +286,15 @@ steps_to_finish_ctx = ceil(isl * batch_size / ctx_tokens)
 - MkSim 核心不内建 chunk loop，chunked prefill 需要外层多次 prefill 调用近似。
 - AIConfigurator 内部可以通过 `ctx_tokens` 建模 chunked prefill / IFB。
 
-对 HitFloor Step4 的影响：
+对 InferTwin Step4 的影响：
 
-- 如果使用 AIConfigurator adapter，可以把 HitFloor scheduler 的 token budget 映射为 `ctx_tokens`。
-- 但如果 HitFloor 已经逐 iteration 做 scheduler replay，再让 AIConfigurator 内部再拆 IFB，可能会双重建模 chunking。
+- 如果使用 AIConfigurator adapter，可以把 InferTwin scheduler 的 token budget 映射为 `ctx_tokens`。
+- 但如果 InferTwin 已经逐 iteration 做 scheduler replay，再让 AIConfigurator 内部再拆 IFB，可能会双重建模 chunking。
 - 因此需要决定 adapter 模式：
-  - `iteration_mode`: HitFloor 每个 iteration 调一次 simulator，`ctx_tokens` 设为本轮 total scheduled prefill tokens 或关闭内部分块。
-  - `request_batch_mode`: AIConfigurator 自己建模 IFB/chunking，HitFloor 只提供代表 batch workload。
+  - `iteration_mode`: InferTwin 每个 iteration 调一次 simulator，`ctx_tokens` 设为本轮 total scheduled prefill tokens 或关闭内部分块。
+  - `request_batch_mode`: AIConfigurator 自己建模 IFB/chunking，InferTwin 只提供代表 batch workload。
 
-Step4 Batch C 更适合 `iteration_mode`，因为 replay 已由 HitFloor 控制。
+Step4 Batch C 更适合 `iteration_mode`，因为 replay 已由 InferTwin 控制。
 
 ## 模型 profile
 
@@ -325,7 +325,7 @@ mapped family = DEEPSEEKV32
 - NEMOTRONH
 - QWEN35
 
-模型结构参数从 HF `config.json` 读取，不需要在 HitFloor 中手填 hidden size、layer count、head dim 等。
+模型结构参数从 HF `config.json` 读取，不需要在 InferTwin 中手填 hidden size、layer count、head dim 等。
 
 ## 并行、dtype 与 backend
 
@@ -444,7 +444,7 @@ cache 命中在 AIConfigurator 中只体现为：
 从 HBM/DDR/远端读回 KV 的独立时间
 ```
 
-因此 HitFloor 仍需外接 Ramulator2 或独立 backend 来建模 DDR KV load。
+因此 InferTwin 仍需外接 Ramulator2 或独立 backend 来建模 DDR KV load。
 
 ## 输出与单位
 
@@ -473,7 +473,7 @@ AIConfigurator 包含：
 不包含：
 
 - queueing delay。
-- HitFloor 的 instance-level replay。
+- InferTwin 的 instance-level replay。
 - KV load / transfer 独立时间。
 
 ## 确定性
@@ -501,22 +501,22 @@ database_mode = "SILICON"
 | License | Apache-2.0 |
 | 单点耗时 | 亚秒级到秒级 |
 
-## 与 HitFloor 的需求对照
+## 与 InferTwin 的需求对照
 
-| HitFloor 关注点 | AIConfigurator 状态 | 影响 |
+| InferTwin 关注点 | AIConfigurator 状态 | 影响 |
 | :--- | :--- | :--- |
 | 单 shape 延迟 | 支持 `cli_estimate` | 可作为 backend |
 | 批量多 shape | 无原生 list 接口 | 外层循环 + memo |
-| batch size | 请求数 | 与 HitFloor slice count 口径接近 |
+| batch size | 请求数 | 与 InferTwin slice count 口径接近 |
 | miss tokens / prefix hit | 用 `prefix` 表达 | 需要 adapter 转换 |
-| chunked prefill | 通过 `ctx_tokens` / IFB 建模 | 需避免和 HitFloor scheduler 双重建模 |
+| chunked prefill | 通过 `ctx_tokens` / IFB 建模 | 需避免和 InferTwin scheduler 双重建模 |
 | heterogeneous batch | 不直接支持 per-request shape | 需要转换策略 |
 | GLM-5 | 内建支持 | 可用 |
 | Ascend 910C | 有 profile | 需 support check |
-| DDR KV load | 不支持 | HitFloor/Ramulator2 外接 |
-| 排队延迟 | 不支持 | HitFloor replay 外接 |
+| DDR KV load | 不支持 | InferTwin/Ramulator2 外接 |
+| 排队延迟 | 不支持 | InferTwin replay 外接 |
 
-## HitFloor 接口影响
+## InferTwin 接口影响
 
 ### 1. 不能把 BatchShape 直接视为 AIConfigurator input
 
@@ -530,33 +530,33 @@ osl
 ctx_tokens
 ```
 
-HitFloor `BatchShape` 是 per-request-slice shape，可能 heterogeneous。
+InferTwin `BatchShape` 是 per-request-slice shape，可能 heterogeneous。
 
 因此需要 adapter-specific conversion。
 
 ### 2. chunked prefill 有两种建模路径
 
-路径 A：HitFloor 控制 chunk。
+路径 A：InferTwin 控制 chunk。
 
 ```text
-HitFloor scheduler emits one iteration
+InferTwin scheduler emits one iteration
 AIConfigurator estimates that iteration as one prefill step
 ```
 
 路径 B：AIConfigurator 控制 chunk。
 
 ```text
-HitFloor provides full workload
+InferTwin provides full workload
 AIConfigurator uses ctx_tokens to model IFB/chunking
 ```
 
-Step4 Batch C 已经选择由 HitFloor replay 控制 scheduler 和 chunked prefill，因此更适合路径 A。
+Step4 Batch C 已经选择由 InferTwin replay 控制 scheduler 和 chunked prefill，因此更适合路径 A。
 
 ### 3. prefix 与 previous chunk context 需要区分
 
 AIConfigurator 的 `prefix` 表示“已缓存、无需算 activation”的 tokens。
 
-HitFloor 的 `computed_tokens_before` 可能包含两类：
+InferTwin 的 `computed_tokens_before` 可能包含两类：
 
 - 原本从 prefix cache 命中的 tokens。
 - 同一请求前面 chunk 已经算完的 tokens。
@@ -575,7 +575,7 @@ scheduled_prefill_tokens
 
 ### 4. out_len 仍需配置
 
-AIConfigurator 需要 `osl`。HitFloor Step4 不建模 decode TPOT。
+AIConfigurator 需要 `osl`。InferTwin Step4 不建模 decode TPOT。
 
 建议 adapter 配置显式提供：
 

@@ -1,37 +1,41 @@
-# HitFloor
+# InferTwin
 
-HitFloor is an offline simulator for large-scale LLM inference service clusters. It replays traces through tokenizer, scheduler, cache, and latency models, then exposes structured metrics for outer capabilities such as capacity sweep reports.
+InferTwin is an offline simulator for large-scale LLM inference service clusters. It replays traces through tokenizer, scheduler, cache, and latency models, then exposes structured metrics for outer capabilities such as capacity sweep reports.
 
 ## Project Layout
 
 ```text
-HitFloor/
+InferTwin/
   configs/              # Model, hardware, backend, and experiment configs
   data/                 # Local trace data, ignored by default
   docs/                 # Product and design documents
   notebooks/            # Exploratory analysis
   reports/              # Generated simulation reports
   scripts/              # Thin operational scripts
-  src/hitfloor/         # Main Python package
+  src/infertwin/         # Main Python package
   tests/                # Unit and integration tests
 ```
 
 ## First Commands
 
 ```bash
-PYTHONPATH=src python -m hitfloor.cli.main --help
-PYTHONPATH=src python -m hitfloor.cli.main simulate --config configs/experiments/default.yaml
-PYTHONPATH=src python -m hitfloor.cli.main sweep --config configs/experiments/step6_capacity_sweep.yaml
+PYTHONPATH=src python -m infertwin.cli.main --help
+PYTHONPATH=src python -m infertwin.cli.main simulate --config configs/experiments/default.yaml
+PYTHONPATH=src python -m infertwin.cli.main sweep --config configs/experiments/step6_capacity_sweep.yaml
+PYTHONPATH=src python -m infertwin.cli.main sweep-streaming --config <streaming_capacity_sweep.yaml>
+PYTHONPATH=src python -m infertwin.cli.main normalize-trace --input <unrouted.csv> --output <routed.csv> --instance-uuid <instance>
 python scripts/run_simulation.py --config configs/experiments/default.yaml
 pytest
 ```
 
-When HitFloor is installed as a package, the formal entrypoint is:
+When InferTwin is installed as a package, the formal entrypoint is:
 
 ```bash
-hitfloor simulate --config configs/experiments/default.yaml
-hitfloor sweep --config configs/experiments/step6_capacity_sweep.yaml
-hitfloor validate-trace --input data/samples/sample_trace.csv
+infertwin simulate --config configs/experiments/default.yaml
+infertwin sweep --config configs/experiments/step6_capacity_sweep.yaml
+infertwin sweep-streaming --config <streaming_capacity_sweep.yaml>
+infertwin validate-trace --input data/samples/sample_trace.csv
+infertwin normalize-trace --input <unrouted.csv> --output <routed.csv> --instance-uuid <instance>
 ```
 
 The scripts in `scripts/` are thin wrappers for local development.
@@ -40,7 +44,7 @@ The current repository contains the maintainable project skeleton and stable ext
 
 ## Architecture Boundary
 
-HitFloor separates the **core simulator** from **outer capabilities**.
+InferTwin separates the **core simulator** from **outer capabilities**.
 
 The core simulator owns replay semantics and structured results:
 
@@ -57,7 +61,7 @@ The core simulator owns replay semantics and structured results:
 
 Outer capabilities consume the core simulator output:
 
-- HitFloor tables such as `capacity_sweep.csv`.
+- InferTwin tables such as `capacity_sweep.csv`.
 - Markdown summaries.
 - CLI and scripts.
 - dashboards, notebooks, and batch jobs.
@@ -82,10 +86,21 @@ Step1-Step6 have built the core offline replay skeleton:
 - fixed-routing, multi-instance isolated replay.
 - vLLM-like continuous batching and chunked prefill approximation.
 - fitted TTFT latency backend.
+- instance latency profiles for true streaming replay.
+- model registry and instance-to-model binding for default TTFT fallback.
+- calibration-failure fallback policy schema for future external TTFT calibration.
 - infinite HBM replay and finite HBM LRU replay.
+- vLLM-like cached-token accounting for replay metrics.
+- profile schema / RunSpec / ConfigGuard foundation.
+- profile-aware request build and tokenizer-stage long-request rejection.
+- ServingLatencyProfile and materialization policy interfaces.
 - streaming `cache_events.csv`.
 - HBM capacity sweep runner.
+- true streaming request sharding, replay, metric aggregation, and capacity sweep runner.
+- streaming benchmark harness for throughput and memory observation.
 - package CLI as the formal entrypoint; `scripts/` are wrappers.
+- outer `normalize-trace` utility for converting explicitly unrouted traces into
+  single-instance routed traces before replay.
 - clean `ruff check`, `ruff format --check`, and full pytest baseline.
 
 Step1-Step6 are a simulation foundation. Step6 v1 implements an `HBM Cache Capacity Sweep Report`, not an automatic P90 target solver. The Step6 runner returns structured sweep results; `capacity_sweep.csv` and `summary.md` are report/export outputs around the core simulator.
@@ -99,7 +114,85 @@ Step6 v1 boundaries:
 - Disable cache event detail by default; allow event dump only for explicitly selected capacities.
 - Keep replay single-threaded first; parallel sweep execution is future work.
 
-The project is now in a core-simulator engineering optimization stage before Step7.
+The core-simulator engineering optimization stage, true streaming architecture
+task, and Pre-Step7 model registry / instance model binding cleanup are complete.
+InferTwin is ready to enter Step7 after the next stage scope is declared as either
+core simulator work or an outer capability.
+
+For large traces, use the opt-in streaming path:
+
+```bash
+PYTHONPATH=src python -m infertwin.cli.main sweep-streaming --config <config.yaml>
+```
+
+For traces without `instance_uuid`, only use normalization when you explicitly do
+not want gateway routing simulation and want a single-instance baseline:
+
+```bash
+PYTHONPATH=src python -m infertwin.cli.main normalize-trace \
+  --input data/raw/unrouted_trace.csv \
+  --output data/processed/routed_single_instance_trace.csv \
+  --instance-uuid single-instance
+```
+
+`normalize-trace` is an outer data-preparation capability. It is not gateway
+routing simulation, and the core simulator still consumes routed traces with an
+`instance_uuid` column.
+
+For fixed-routed traces where instances need different fitted TTFT parameters,
+enable the instance latency table in the streaming config:
+
+```yaml
+model_registry:
+  profile_path: configs/models/registry.yaml
+
+instance_latency:
+  profile_path: configs/instances/local-fixed-route-latency-example.yaml
+  require_all_trace_instances: true
+
+latency_fallback:
+  on_calibration_failure: use_model_default
+```
+
+Example:
+
+```bash
+PYTHONPATH=src python -m infertwin.cli.main sweep-streaming \
+  --config configs/experiments/streaming_capacity_sweep_instance_latency.yaml
+```
+
+Current scope: this selects latency backend by `instance_uuid`. It does not yet
+provide per-instance scheduler config, per-instance cache capacity, dynamic
+per-500-request refit, DDR / remote KV-load latency materialization, or gateway
+routing simulation.
+
+`model_registry` is an index from model name to model profile, tokenizer/chat
+profile, and default latency profile. `instance_latency` is the fixed-routed
+instance binding table: `instance_uuid -> model/deployment/optional latency
+profile`. If an instance has a dedicated `latency_profile`, that profile wins.
+If it does not and `model_registry.profile_path` is configured, InferTwin uses
+the model default TTFT profile. If neither is available, configured instance
+tables fail fast instead of silently using unrelated parameters.
+
+`latency_fallback` is only for future external calibration failures, such as an
+AIConfigurator / MkSim calibration timeout or invalid calibration output. It
+does not catch request build, tokenizer, trace schema, scheduler, cache, replay,
+or ordinary fitted backend construction errors. Dynamic per-instance refit every
+500 requests is not implemented yet; the current field is schema and policy
+preparation.
+
+For local throughput and memory observation:
+
+```bash
+.venv/bin/python scripts/benchmark_streaming_replay.py \
+  --requests 10000 \
+  --instances 4 \
+  --prompt-words 256 \
+  --reuse-period 64 \
+  --capacities 128,512 \
+  --output-dir reports/streaming_benchmark \
+  --output-json reports/streaming_benchmark/benchmark.json
+```
 
 Future core-simulator capabilities:
 
@@ -109,6 +202,8 @@ Future core-simulator capabilities:
 - instance-side queueing policy simulation.
 - external AIConfigurator / MkSim production adapters.
 - cross-instance KV pooling.
+- progressive block visibility; this is required after Step7 as a new replay/cache mode.
+- decode / TPOT modeling when there is an explicit PD-colocated decode modeling need.
 
 Future outer capabilities:
 
@@ -123,7 +218,7 @@ Active docs:
 ```text
 docs/global_memory.md
 docs/code_development_requirements.md
-docs/hitfloor_product_design.md
+docs/infertwin_product_design.md
 docs/core_simulator_technical_plan.md
 ```
 
@@ -134,6 +229,7 @@ docs/notes/simulator_integration_guide.md
 docs/notes/aiconfigurator_manual.md
 docs/notes/markov_infer_sim_manual.md
 docs/notes/internal_model_deployment_method.md
+docs/notes/cached_tokens_calculation_logic.md
 ```
 
 Archived stage docs:
@@ -143,6 +239,10 @@ docs/archive/pre_step6_cleanup_plan.md
 docs/archive/implementation_plan.md
 docs/archive/future_simulation_extensions.md
 docs/archive/development_status.md
+docs/archive/engineering_optimization/
+docs/archive/instance_latency_profiles/
+docs/archive/pre_step7_model_registry/
+docs/archive/true_streaming/
 docs/archive/step4/
 docs/archive/step5/
 docs/archive/step6/
@@ -159,9 +259,24 @@ duration_ms = intercept_ms + ms_per_uncached_token * scheduled_prefill_tokens
 
 AIConfigurator and MkSim are treated first as calibration sources for fitted profiles, and only later as optional high-precision replay backends.
 
+For true streaming replay, `instance_latency.profile_path` can override this
+global backend per fixed-routed instance. Missing trace instances fail fast when
+an instance latency table is configured.
+
+When `model_registry.profile_path` is configured, `InstanceLatencyBackendResolver`
+resolves latency backend in this order:
+
+1. Instance-specific `latency_profile`.
+2. Model registry `default_latency` for the instance's `model_name`.
+3. Legacy global `latency` backend only when no instance profile is configured.
+
+The resolver exposes `latency_source_by_instance` in streaming sweep
+`config_details` and `summary.md` so reports can explain whether an instance used
+`instance_profile`, `model_default`, or the legacy global backend.
+
 ## Core Semantics (Frozen)
 
-The following HitFloor semantics are stable. Future work must not silently change
+The following InferTwin semantics are stable. Future work must not silently change
 their meaning. If a later stage needs different semantics, add a new Python type,
 data structure, adapter, or interface instead of reusing these names with changed
 meaning.
@@ -180,30 +295,39 @@ meaning.
   and simulator-specific input types.
 - `ScheduledSlice`: one request's prefill work scheduled in one iteration.
   `scheduled_prefill_tokens` must be positive.
-- `cached_prefix_tokens`: tokens hit from prefix cache at first-schedule-time
-  lookup.
+- `cached_prefix_tokens`: replay-facing usage cached tokens after vLLM-like
+  accounting at first-schedule-time lookup. Raw cache events may report resident
+  block hits that do not count as usage cached tokens.
 - `previous_chunk_tokens`: tokens already computed by earlier chunks of the same
   request.
 - `computed_tokens_before = cached_prefix_tokens + previous_chunk_tokens`.
 - `miss_tokens = prompt_tokens - cached_prefix_tokens` at cache lookup time.
   Miss tokens may be computed across one or more scheduler iterations.
-- A 100% prefix-hit request has `miss_tokens = 0`, produces no `ScheduledSlice`,
-  and must use a zero-miss fast-finish path in batch-aware replay.
+- A zero-miss request has `miss_tokens = 0`, produces no `ScheduledSlice`, and
+  must use a zero-miss fast-finish path in batch-aware replay. For ordinary
+  positive-length prompts, vLLM-like accounting applies `prompt_tokens - 1` and
+  full-block flooring, so raw full-block residency does not automatically imply
+  `miss_tokens = 0`.
 - Cache lookup happens when a request is first eligible to be considered by the
   scheduler, not when it arrives in the trace.
 - Cache materialization happens only after a request's prefill finishes. Blocks
   materialized at an iteration finish are not visible within the same iteration.
   This is a conservative offline replay rule, not a physical vLLM block-manager
   timeline. Real vLLM / vLLM-Ascend deployments may expose full blocks
-  progressively during prefill; HitFloor's `batch_aware_hbm_lru` mode does not.
+  progressively during prefill; InferTwin's `batch_aware_hbm_lru` mode does not.
   If progressive block visibility is needed later, add a new replay/cache mode
   instead of changing this mode's materialization semantics.
 - `ttft_ms = finish_time_ms - arrival_time_ms`.
+- Request-level TTFT is modeled as
+  `queue_waiting_ms + uncached_prefill_compute_ms + kv_load_ms`. Current replay
+  keeps `queue_waiting_ms = 0` and `kv_load_ms = 0`; instance latency profiles
+  currently control the fitted uncached prefill compute component.
 - `scheduler_wait_ms = first_scheduled_time_ms - arrival_time_ms`. For a zero-miss
   request, `first_scheduled_time_ms` is the time when the replay first considers
   and fast-finishes the request.
 - Step4 scope is fixed-routing, multi-instance isolated replay. Requests are
-  grouped by `instance_uuid` from the trace, each instance replays independently
-  with its own infinite HBM prefix cache, and HitFloor does not simulate routing
-  decisions. Step4 does not model DDR, SSD, cross-instance KV pooling, PD ratio
-  search, decode TPOT, MTP, or KV transfer time.
+  grouped by `instance_uuid` from the trace, each instance replays independently,
+  and InferTwin does not simulate routing decisions. Current core replay does not
+  model DDR, SSD, cross-instance KV pooling, PD ratio search, decode TPOT, or KV
+  transfer time. MTP/EAGLE-style drop-block effects are represented only in
+  cached-token accounting, not as real speculative decode execution.

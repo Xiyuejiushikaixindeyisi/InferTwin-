@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from hitfloor.cli.main import validate_trace
+from infertwin.cli.main import validate_trace
 
 
 def test_validate_trace_returns_basic_summary(tmp_path: Path) -> None:

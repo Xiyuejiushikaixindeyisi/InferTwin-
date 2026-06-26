@@ -1,7 +1,7 @@
 import pytest
 
-from hitfloor.latency.fitted_ttft import FittedTTFTLatencyBackend
-from hitfloor.scheduler.batch_shape import BatchShape, ScheduledSlice
+from infertwin.latency.fitted_ttft import FittedTTFTLatencyBackend
+from infertwin.scheduler.batch_shape import BatchShape, ScheduledSlice
 
 
 def test_fitted_ttft_latency_increases_with_scheduled_prefill_tokens() -> None:

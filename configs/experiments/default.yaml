@@ -1,5 +1,5 @@
 experiment:
-  name: default_hitfloor_simulation
+  name: default_infertwin_simulation
   description: Offline batch-aware replay with infinite per-instance HBM cache.
 
 simulation:

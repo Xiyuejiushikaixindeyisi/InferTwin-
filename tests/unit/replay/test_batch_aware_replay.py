@@ -2,12 +2,12 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from hitfloor.instance.request import SimulationRequest
-from hitfloor.latency.formula import FormulaLatencyBackend
-from hitfloor.replay.event_loop import BatchAwareReplayEngine
-from hitfloor.request.block_hasher import build_prefix_blocks
-from hitfloor.scheduler.config import SchedulerConfig
-from hitfloor.scheduler.vllm_like import VllmLikeBatchScheduler
+from infertwin.instance.request import SimulationRequest
+from infertwin.latency.formula import FormulaLatencyBackend
+from infertwin.replay.event_loop import BatchAwareReplayEngine
+from infertwin.request.block_hasher import build_prefix_blocks
+from infertwin.scheduler.config import SchedulerConfig
+from infertwin.scheduler.vllm_like import VllmLikeBatchScheduler
 
 
 def test_replay_finishes_single_chunked_request() -> None:
@@ -27,39 +27,37 @@ def test_replay_finishes_single_chunked_request() -> None:
     assert [item.scheduled_prefill_tokens for item in result.iteration_metrics] == [4, 4]
 
 
-def test_zero_miss_request_uses_fast_finish_without_iteration() -> None:
+def test_empty_prompt_uses_fast_finish_without_iteration() -> None:
     engine = _engine(max_num_batched_tokens=4, prefill_token_ms=1.0)
-    first = _request("r1", start_time_ms=0.0, token_ids=[1, 2, 3, 4])
-    second = _request("r2", start_time_ms=10.0, token_ids=[1, 2, 3, 4])
+    request = _request("r1", start_time_ms=10.0, token_ids=[])
 
-    result = engine.run([first, second])
+    result = engine.run([request])
 
-    first_metrics, second_metrics = result.request_metrics
-    assert first_metrics.miss_tokens == 4
-    assert second_metrics.hbm_hit_tokens == 4
-    assert second_metrics.miss_tokens == 0
-    assert second_metrics.scheduled_iteration_count == 0
-    assert second_metrics.first_scheduled_time_ms == 10.0
-    assert second_metrics.finish_time_ms == 10.0
-    assert second_metrics.ttft_ms == 0.0
-    assert len(result.iteration_metrics) == 1
+    (metrics,) = result.request_metrics
+    assert metrics.hbm_hit_tokens == 0
+    assert metrics.miss_tokens == 0
+    assert metrics.scheduled_iteration_count == 0
+    assert metrics.first_scheduled_time_ms == 10.0
+    assert metrics.finish_time_ms == 10.0
+    assert metrics.ttft_ms == 0.0
+    assert result.iteration_metrics == ()
 
 
 def test_lookup_happens_on_first_schedule_not_arrival() -> None:
-    engine = _engine(max_num_batched_tokens=4, fixed_overhead_ms=10.0, prefill_token_ms=0.0)
-    first = _request("r1", start_time_ms=0.0, token_ids=[1, 2, 3, 4])
-    second = _request("r2", start_time_ms=1.0, token_ids=[1, 2, 3, 4])
+    engine = _engine(max_num_batched_tokens=5, fixed_overhead_ms=10.0, prefill_token_ms=0.0)
+    first = _request("r1", start_time_ms=0.0, token_ids=[1, 2, 3, 4, 5])
+    second = _request("r2", start_time_ms=1.0, token_ids=[1, 2, 3, 4, 5])
 
     result = engine.run([first, second])
 
     first_metrics, second_metrics = result.request_metrics
     assert first_metrics.finish_time_ms == 10.0
     assert second_metrics.hbm_hit_tokens == 4
-    assert second_metrics.miss_tokens == 0
+    assert second_metrics.miss_tokens == 1
     assert second_metrics.first_scheduled_time_ms == 10.0
     assert second_metrics.scheduler_wait_ms == 9.0
-    assert second_metrics.ttft_ms == 9.0
-    assert len(result.iteration_metrics) == 1
+    assert second_metrics.ttft_ms == 19.0
+    assert len(result.iteration_metrics) == 2
 
 
 def test_materialization_not_visible_within_same_iteration() -> None:

@@ -1,9 +1,9 @@
-from hitfloor.cache.event_sink import (
+from infertwin.cache.event_sink import (
     InMemoryCacheEventSink,
     NullCacheEventSink,
     StatsOnlyCacheEventSink,
 )
-from hitfloor.cache.events import EVICT, LOOKUP_HIT, LOOKUP_MISS, MATERIALIZE, CacheEvent
+from infertwin.cache.events import EVICT, LOOKUP_HIT, LOOKUP_MISS, MATERIALIZE, CacheEvent
 
 
 def test_in_memory_cache_event_sink_collects_events_and_stats() -> None:
@@ -25,6 +25,21 @@ def test_in_memory_cache_event_sink_collects_events_and_stats() -> None:
     assert sink.stats.evict_events == 1
     assert sink.stats.peak_hbm_used_blocks == 1
     assert sink.stats.final_hbm_used_blocks == 0
+
+
+def test_in_memory_cache_event_sink_fails_when_event_cap_is_reached() -> None:
+    sink = InMemoryCacheEventSink(max_events=1)
+    sink.emit_many((_event(LOOKUP_MISS, hbm_used_blocks=0),))
+
+    try:
+        sink.emit_many((_event(MATERIALIZE, hbm_used_blocks=1),))
+    except MemoryError as exc:
+        assert "StatsOnlyCacheEventSink" in str(exc)
+    else:
+        raise AssertionError("expected MemoryError")
+
+    assert sink.stats.total_events == 1
+    assert len(sink.snapshot_events()) == 1
 
 
 def test_null_cache_event_sink_drops_events_without_tracking_stats() -> None:

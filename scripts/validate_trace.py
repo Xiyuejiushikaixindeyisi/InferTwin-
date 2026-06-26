@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Validate that a trace can be parsed by HitFloor."""
+"""Validate that a trace can be parsed by InferTwin."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ def _ensure_src_path() -> None:
 
 def main(argv: list[str] | None = None) -> int:
     _ensure_src_path()
-    from hitfloor.cli.main import main as cli_main
+    from infertwin.cli.main import main as cli_main
 
     args = list(sys.argv[1:] if argv is None else argv)
     if "--trace" in args:

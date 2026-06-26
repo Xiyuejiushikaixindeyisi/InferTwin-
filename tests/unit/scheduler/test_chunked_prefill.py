@@ -1,7 +1,7 @@
-from hitfloor.scheduler.config import SchedulerConfig
-from hitfloor.scheduler.queue import WaitingQueue
-from hitfloor.scheduler.state import RequestState
-from hitfloor.scheduler.vllm_like import VllmLikeBatchScheduler
+from infertwin.scheduler.config import SchedulerConfig
+from infertwin.scheduler.queue import WaitingQueue
+from infertwin.scheduler.state import RequestState
+from infertwin.scheduler.vllm_like import VllmLikeBatchScheduler
 
 
 def test_chunked_prefill_splits_long_request() -> None:

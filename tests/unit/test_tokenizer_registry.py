@@ -1,5 +1,5 @@
-from hitfloor.request.parser import parse_request_params
-from hitfloor.request.tokenizer_registry import TokenizerRegistry
+from infertwin.request.parser import parse_request_params
+from infertwin.request.tokenizer_registry import TokenizerRegistry
 
 
 def test_tokenizer_registry_resolves_model_alias_and_encodes_prompt() -> None:
@@ -8,7 +8,7 @@ def test_tokenizer_registry_resolves_model_alias_and_encodes_prompt() -> None:
         """
         {
           "model": "example-llm",
-          "messages": [{"role": "user", "content": "hello hitfloor"}],
+          "messages": [{"role": "user", "content": "hello infertwin"}],
           "tools": []
         }
         """

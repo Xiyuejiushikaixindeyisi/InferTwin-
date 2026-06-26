@@ -1,6 +1,6 @@
-from hitfloor.scheduler.config import SchedulerConfig
-from hitfloor.scheduler.planning import planned_prefill_tokens
-from hitfloor.scheduler.state import RequestState
+from infertwin.scheduler.config import SchedulerConfig
+from infertwin.scheduler.planning import planned_prefill_tokens
+from infertwin.scheduler.state import RequestState
 
 
 def test_planned_prefill_tokens_respects_token_budget() -> None:

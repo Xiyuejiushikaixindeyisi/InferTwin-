@@ -1,4 +1,4 @@
-from hitfloor.request.block_hasher import build_prefix_blocks
+from infertwin.request.block_hasher import build_prefix_blocks
 
 
 def test_block_hash_is_stable_for_same_prompt() -> None:

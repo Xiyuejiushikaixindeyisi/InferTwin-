@@ -1,14 +1,15 @@
 from datetime import datetime, timedelta
 
-from hitfloor.cache.event_sink import InMemoryCacheEventSink
-from hitfloor.cache.events import EVICT, LOOKUP_HIT, LOOKUP_MISS, MATERIALIZE
-from hitfloor.cache.hbm_lru import HBMCache
-from hitfloor.instance.request import SimulationRequest
-from hitfloor.latency.formula import FormulaLatencyBackend
-from hitfloor.replay.event_loop import BatchAwareReplayEngine
-from hitfloor.request.block_hasher import build_prefix_blocks
-from hitfloor.scheduler.config import SchedulerConfig
-from hitfloor.scheduler.vllm_like import VllmLikeBatchScheduler
+from infertwin.cache.event_sink import InMemoryCacheEventSink
+from infertwin.cache.events import EVICT, LOOKUP_HIT, LOOKUP_MISS, MATERIALIZE
+from infertwin.cache.hbm_lru import HBMCache
+from infertwin.cache.materialization import FinishTimeMaterializationPolicy
+from infertwin.instance.request import SimulationRequest
+from infertwin.latency.formula import FormulaLatencyBackend
+from infertwin.replay.event_loop import BatchAwareReplayEngine
+from infertwin.request.block_hasher import build_prefix_blocks
+from infertwin.scheduler.config import SchedulerConfig
+from infertwin.scheduler.vllm_like import VllmLikeBatchScheduler
 
 
 def test_finite_hbm_materialization_is_visible_only_after_finish_time() -> None:
@@ -23,8 +24,9 @@ def test_finite_hbm_materialization_is_visible_only_after_finish_time() -> None:
     assert metrics_by_id["r1"].miss_tokens == 4
     assert metrics_by_id["r2"].miss_tokens == 4
     assert metrics_by_id["r2"].hbm_hit_tokens == 0
-    assert metrics_by_id["r3"].hbm_hit_tokens == 4
-    assert metrics_by_id["r3"].miss_tokens == 0
+    assert metrics_by_id["r3"].hbm_hit_tokens == 0
+    assert metrics_by_id["r3"].miss_tokens == 4
+    assert result.cache_event_stats.lookup_hit_events == 1
 
 
 def test_finite_hbm_eviction_prevents_future_prefix_hit() -> None:
@@ -43,21 +45,18 @@ def test_finite_hbm_eviction_prevents_future_prefix_hit() -> None:
     assert EVICT in [event.event_type for event in result.cache_events]
 
 
-def test_zero_miss_fast_finish_works_with_finite_hbm() -> None:
+def test_empty_prompt_fast_finish_works_with_finite_hbm() -> None:
     engine = _engine(max_num_batched_tokens=4, cache_capacity_blocks=2, prefill_token_ms=1.0)
-    first = _request("r1", start_time_ms=0.0, token_ids=[1, 2, 3, 4])
-    repeat = _request("r2", start_time_ms=10.0, token_ids=[1, 2, 3, 4])
+    empty = _request("r1", start_time_ms=10.0, token_ids=[])
 
-    result = _run_with_events(engine, [first, repeat])
+    result = _run_with_events(engine, [empty])
 
-    first_metrics, repeat_metrics = result.request_metrics
-    assert first_metrics.miss_tokens == 4
-    assert repeat_metrics.hbm_hit_tokens == 4
-    assert repeat_metrics.miss_tokens == 0
-    assert repeat_metrics.scheduled_iteration_count == 0
-    assert repeat_metrics.finish_time_ms == 10.0
-    assert len(result.iteration_metrics) == 1
-    assert LOOKUP_HIT in [event.event_type for event in result.cache_events]
+    (metrics,) = result.request_metrics
+    assert metrics.hbm_hit_tokens == 0
+    assert metrics.miss_tokens == 0
+    assert metrics.scheduled_iteration_count == 0
+    assert metrics.finish_time_ms == 10.0
+    assert result.iteration_metrics == ()
 
 
 def test_finite_hbm_cache_is_isolated_by_instance() -> None:
@@ -110,7 +109,8 @@ def test_default_batch_aware_replay_still_uses_infinite_hbm_without_events() -> 
         ]
     )
 
-    assert result.request_metrics[1].hbm_hit_tokens == 4
+    assert result.request_metrics[1].hbm_hit_tokens == 0
+    assert result.request_metrics[1].miss_tokens == 4
     assert result.cache_events == ()
     assert result.cache_event_stats.total_events == 0
 
@@ -122,9 +122,29 @@ def test_default_finite_hbm_replay_drains_events_without_storing_them() -> None:
 
     result = engine.run([first, repeat])
 
-    assert result.request_metrics[1].hbm_hit_tokens == 4
+    assert result.request_metrics[1].hbm_hit_tokens == 0
+    assert result.request_metrics[1].miss_tokens == 4
     assert result.cache_events == ()
-    assert result.cache_event_stats.total_events == 0
+    assert result.cache_event_stats.total_events > 0
+    assert result.cache_event_stats.lookup_hit_events > 0
+
+
+def test_batch_aware_replay_uses_materialization_policy() -> None:
+    policy = _RecordingMaterializationPolicy()
+    engine = _engine(
+        max_num_batched_tokens=4,
+        cache_capacity_blocks=2,
+        prefill_token_ms=1.0,
+        materialization_policy=policy,
+    )
+    first = _request("r1", start_time_ms=0.0, token_ids=[1, 2, 3, 4])
+    repeat = _request("r2", start_time_ms=10.0, token_ids=[1, 2, 3, 4])
+
+    result = engine.run([first, repeat])
+
+    assert policy.calls == [("r1", "instance-a", 4.0, 1)]
+    assert result.request_metrics[1].hbm_hit_tokens == 0
+    assert result.request_metrics[1].miss_tokens == 4
 
 
 def _engine(
@@ -133,6 +153,7 @@ def _engine(
     cache_capacity_blocks: int,
     max_num_seqs: int = 8,
     prefill_token_ms: float = 1.0,
+    materialization_policy=None,
 ) -> BatchAwareReplayEngine:
     scheduler = VllmLikeBatchScheduler(
         SchedulerConfig(
@@ -153,6 +174,7 @@ def _engine(
         scheduler=scheduler,
         latency_backend=latency_backend,
         cache_factory=lambda _instance_uuid: HBMCache(capacity_blocks=cache_capacity_blocks),
+        materialization_policy=materialization_policy,
     )
 
 
@@ -198,3 +220,29 @@ def _request(
         prompt_blocks=tuple(blocks),
         kv_bytes_per_token=1,
     )
+
+
+class _RecordingMaterializationPolicy:
+    name = "recording_finish_time"
+
+    def __init__(self) -> None:
+        self._delegate = FinishTimeMaterializationPolicy()
+        self.calls: list[tuple[str, str, float, int]] = []
+
+    def materialize_finished_request(
+        self,
+        *,
+        cache,
+        blocks,
+        finish_time_ms: float,
+        request_id: str,
+        instance_uuid: str,
+    ) -> None:
+        self.calls.append((request_id, instance_uuid, finish_time_ms, len(blocks)))
+        self._delegate.materialize_finished_request(
+            cache=cache,
+            blocks=blocks,
+            finish_time_ms=finish_time_ms,
+            request_id=request_id,
+            instance_uuid=instance_uuid,
+        )

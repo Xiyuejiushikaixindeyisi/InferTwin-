@@ -1,9 +1,9 @@
 from pathlib import Path
 
-from hitfloor.instance.request import build_simulation_requests
-from hitfloor.request.tokenizer_registry import TokenizerRegistry
-from hitfloor.trace.reader import read_trace_csv
-from hitfloor.trace.schema import TraceRecord
+from infertwin.instance.request import build_simulation_requests
+from infertwin.request.tokenizer_registry import TokenizerRegistry
+from infertwin.trace.reader import read_trace_csv
+from infertwin.trace.schema import TraceRecord
 
 
 def test_build_simulation_requests_from_sample_trace() -> None:

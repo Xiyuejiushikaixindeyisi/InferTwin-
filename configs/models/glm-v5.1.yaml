@@ -1,0 +1,9 @@
+model:
+  name: glm-v5.1
+  aliases:
+    - glm-v5
+    - glm-v5-chat
+  tokenizer_profile: glm-v5
+  chat_template_profile: glm-v5
+  max_model_len: 131072
+  cache_family: full_attention

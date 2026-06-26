@@ -1,9 +1,9 @@
 from datetime import datetime, timedelta
 
-from hitfloor.instance.replay import InfiniteHBMReplayEngine
-from hitfloor.instance.request import build_simulation_requests
-from hitfloor.request.tokenizer_registry import TokenizerRegistry
-from hitfloor.trace.schema import TraceRecord
+from infertwin.instance.replay import InfiniteHBMReplayEngine
+from infertwin.instance.request import build_simulation_requests
+from infertwin.request.tokenizer_registry import TokenizerRegistry
+from infertwin.trace.schema import TraceRecord
 
 
 def test_infinite_hbm_hits_only_within_same_instance() -> None:
@@ -19,8 +19,10 @@ def test_infinite_hbm_hits_only_within_same_instance() -> None:
     metrics = InfiniteHBMReplayEngine().run(requests)
 
     assert metrics[0].miss_tokens == metrics[0].prompt_tokens
-    assert metrics[1].hbm_hit_tokens == metrics[1].prompt_tokens
-    assert metrics[1].effective_hit_rate == 1.0
+    assert metrics[1].prompt_tokens == 7
+    assert metrics[1].hbm_hit_tokens == 4
+    assert metrics[1].miss_tokens == 3
+    assert metrics[1].effective_hit_rate == 4 / 7
     assert metrics[2].miss_tokens == metrics[2].prompt_tokens
 
 
@@ -38,7 +40,9 @@ def test_materialization_is_not_visible_before_finish_time() -> None:
 
     assert metrics[0].miss_tokens == metrics[0].prompt_tokens
     assert metrics[1].miss_tokens == metrics[1].prompt_tokens
-    assert metrics[2].hbm_hit_tokens == metrics[2].prompt_tokens
+    assert metrics[2].prompt_tokens == 7
+    assert metrics[2].hbm_hit_tokens == 4
+    assert metrics[2].miss_tokens == 3
 
 
 def _record(request_id: str, instance_uuid: str, timestamp: datetime) -> TraceRecord:

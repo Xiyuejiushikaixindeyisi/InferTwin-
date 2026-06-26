@@ -1,8 +1,8 @@
 import csv
 from pathlib import Path
 
-from hitfloor.experiment.sweep import CapacitySweepRunner
-from hitfloor.report.sweep import write_capacity_sweep_report
+from infertwin.experiment.sweep import CapacitySweepRunner
+from infertwin.report.sweep import write_capacity_sweep_report
 
 
 def test_capacity_sweep_runner_returns_rows_without_report_files(tmp_path: Path) -> None:

@@ -3,7 +3,7 @@ from pathlib import Path
 
 import yaml
 
-from hitfloor.cli.main import run_capacity_sweep
+from infertwin.cli.main import run_capacity_sweep
 from scripts.run_capacity_sweep import main as run_capacity_sweep_script
 
 

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from hitfloor.experiment.runner import ExperimentRunner
+from infertwin.experiment.runner import ExperimentRunner
 
 
 def test_phase1_runner_writes_request_metrics_and_summary(tmp_path: Path) -> None:
