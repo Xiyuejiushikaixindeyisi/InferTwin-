@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from infertwin.config.model_runtime import ModelCacheDefaults, ModelRuntimeDefaults
 from infertwin.config.profiles import InstanceLatencyProfile
 
 
@@ -16,9 +17,18 @@ class ModelRegistryEntry:
 
     name: str
     model_profile_path: Path
+    runtime_defaults: ModelRuntimeDefaults
     tokenizer_profile: str
     chat_template_profile: str | None
     default_latency: InstanceLatencyProfile
+
+    @property
+    def deployment_profile_path(self) -> Path:
+        return self.runtime_defaults.deployment_profile_path
+
+    @property
+    def default_cache(self) -> ModelCacheDefaults:
+        return self.runtime_defaults.cache
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +77,15 @@ def _parse_model_registry_entry(
         name=model_name,
         model_profile_path=Path(
             _required_str(mapping, "model_profile_path", field_name=field_name)
+        ),
+        runtime_defaults=ModelRuntimeDefaults(
+            deployment_profile_path=Path(
+                _required_str(mapping, "deployment_profile_path", field_name=field_name)
+            ),
+            cache=ModelCacheDefaults.from_mapping(
+                _required_mapping(mapping, "default_cache", field_name=field_name),
+                field_name=f"{field_name}.default_cache",
+            ),
         ),
         tokenizer_profile=_required_str(mapping, "tokenizer_profile", field_name=field_name),
         chat_template_profile=_optional_str(

@@ -16,16 +16,28 @@ class ScheduledSlice:
     prompt_tokens: int
     cached_prefix_tokens: int
     previous_chunk_tokens: int
+    kv_load_tokens: int = 0
+    kv_load_bytes: int = 0
 
     def __post_init__(self) -> None:
-        if self.scheduled_prefill_tokens <= 0:
-            raise ValueError("scheduled_prefill_tokens must be positive")
+        if self.scheduled_prefill_tokens < 0:
+            raise ValueError("scheduled_prefill_tokens must be non-negative")
         if self.computed_tokens_before < 0 or self.computed_tokens_after < 0:
             raise ValueError("computed token counts must be non-negative")
         if self.cached_prefix_tokens < 0:
             raise ValueError("cached_prefix_tokens must be non-negative")
         if self.previous_chunk_tokens < 0:
             raise ValueError("previous_chunk_tokens must be non-negative")
+        if self.kv_load_tokens < 0:
+            raise ValueError("kv_load_tokens must be non-negative")
+        if self.kv_load_bytes < 0:
+            raise ValueError("kv_load_bytes must be non-negative")
+        if (
+            self.scheduled_prefill_tokens == 0
+            and self.kv_load_tokens == 0
+            and self.kv_load_bytes == 0
+        ):
+            raise ValueError("zero-token scheduled slice requires KV load")
         expected_before = self.cached_prefix_tokens + self.previous_chunk_tokens
         if self.computed_tokens_before != expected_before:
             raise ValueError(
@@ -77,3 +89,19 @@ class BatchShape:
     @property
     def total_context_tokens(self) -> int:
         return sum(item.computed_tokens_before for item in self.request_slices)
+
+    @property
+    def kv_load_tokens(self) -> int:
+        return sum(item.kv_load_tokens for item in self.request_slices)
+
+    @property
+    def kv_load_bytes(self) -> int:
+        return sum(item.kv_load_bytes for item in self.request_slices)
+
+    @property
+    def kv_load_request_count(self) -> int:
+        return sum(
+            1
+            for item in self.request_slices
+            if item.kv_load_tokens > 0 or item.kv_load_bytes > 0
+        )

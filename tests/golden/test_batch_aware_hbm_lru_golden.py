@@ -159,8 +159,11 @@ def test_batch_aware_hbm_lru_golden_is_deterministic_and_instance_isolated() -> 
         "lookup_miss_events": 4,
         "materialize_events": 3,
         "evict_events": 1,
+        "store_events": 0,
         "peak_hbm_used_blocks": 1,
         "final_hbm_used_blocks": 1,
+        "peak_ddr_used_blocks": 0,
+        "final_ddr_used_blocks": 0,
     }
 
 

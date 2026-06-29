@@ -1,4 +1,4 @@
-"""Experiment runner skeleton."""
+"""Small-trace experiment runner."""
 
 from __future__ import annotations
 

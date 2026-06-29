@@ -1,8 +1,13 @@
 models:
   glm-v5.1:
-    model_profile_path: configs/models/glm-v5.1.yaml
+    model_profile_path: glm-v5.1.yaml
+    deployment_profile_path: ../deployments/glm-v5.1-vllm-ascend-prefill.yaml
     tokenizer_profile: glm-v5
     chat_template_profile: glm-v5
+    default_cache:
+      hbm_capacity_blocks: 4096
+      block_size_tokens: 128
+      eviction_policy: lru
     default_latency:
       backend: fitted_ttft
       model_name: glm-v5.1

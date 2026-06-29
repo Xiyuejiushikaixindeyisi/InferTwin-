@@ -46,6 +46,9 @@ latency:
 model_registry:
   profile_path: configs/models/registry.yaml
 
+instance_runtime:
+  profile_path: configs/instances/local-fixed-route-latency-example.yaml
+
 instance_latency:
   profile_path: configs/instances/local-fixed-route-latency-example.yaml
   require_all_trace_instances: true

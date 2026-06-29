@@ -83,9 +83,21 @@ def test_step5_hbm_lru_runner_writes_cache_events_and_summary(tmp_path: Path) ->
     cache_event_rows = list(csv.DictReader(cache_events_path.open(encoding="utf-8")))
     assert cache_event_rows
     assert result.metrics["cache_event_count"] == len(cache_event_rows)
-    assert {"event_type", "eviction_policy", "hbm_capacity_blocks"}.issubset(cache_event_rows[0])
+    assert {
+        "event_type",
+        "eviction_policy",
+        "hbm_capacity_blocks",
+        "ddr_used_blocks",
+        "ddr_capacity_blocks",
+        "source_tier",
+        "target_tier",
+        "load_tokens",
+        "store_tokens",
+    }.issubset(cache_event_rows[0])
     assert {row["eviction_policy"] for row in cache_event_rows} == {"lru"}
     assert {row["hbm_capacity_blocks"] for row in cache_event_rows} == {"1"}
+    assert {row["ddr_used_blocks"] for row in cache_event_rows} == {"0"}
+    assert {row["store_tokens"] for row in cache_event_rows} == {"0"}
 
     summary = summary_path.read_text(encoding="utf-8")
     assert "batch_aware_hbm_lru" in summary

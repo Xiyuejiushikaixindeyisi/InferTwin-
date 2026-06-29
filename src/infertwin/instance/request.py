@@ -37,6 +37,7 @@ def build_simulation_request(
     block_size_tokens: int,
     cache_scope: str = "tenant_isolated",
     build_context: RequestBuildContext | None = None,
+    tokenizer_profile: str | None = None,
 ) -> SimulationRequest:
     context = build_context or RequestBuildContext.legacy(block_size_tokens)
     parsed = parse_request_params(record.request_params)
@@ -44,6 +45,7 @@ def build_simulation_request(
     tokenization = tokenizer_registry.encode(
         parsed,
         max_prompt_tokens=context.max_prompt_tokens,
+        tokenizer_profile=tokenizer_profile,
     )
     block_conversion = context.calculate_block_conversion(tokenization.prompt_tokens)
     blocks = build_prefix_blocks(
@@ -78,6 +80,7 @@ def build_simulation_requests(
     block_size_tokens: int,
     cache_scope: str = "tenant_isolated",
     build_context: RequestBuildContext | None = None,
+    tokenizer_profile: str | None = None,
 ) -> list[SimulationRequest]:
     requests = [
         build_simulation_request(
@@ -86,6 +89,7 @@ def build_simulation_requests(
             block_size_tokens=block_size_tokens,
             cache_scope=cache_scope,
             build_context=build_context,
+            tokenizer_profile=tokenizer_profile,
         )
         for record in records
     ]

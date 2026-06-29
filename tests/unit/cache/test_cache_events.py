@@ -28,6 +28,12 @@ def test_hbm_cache_events_include_required_context_and_drain() -> None:
     assert events[2].eviction_policy == "lru"
     assert events[2].hbm_used_blocks == 0
     assert events[2].hbm_capacity_blocks == 1
+    assert all(event.ddr_used_blocks == 0 for event in events)
+    assert all(event.ddr_capacity_blocks == 0 for event in events)
+    assert all(event.source_tier == "" for event in events)
+    assert all(event.target_tier == "" for event in events)
+    assert all(event.load_tokens == 0 for event in events)
+    assert all(event.store_tokens == 0 for event in events)
     assert cache.take_events() == ()
 
 

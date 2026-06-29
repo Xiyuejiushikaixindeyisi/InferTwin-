@@ -13,8 +13,16 @@ def test_model_registry_parses_default_latency_profile() -> None:
 
     assert entry.name == "glm-v5.1"
     assert entry.model_profile_path == Path("configs/models/glm-v5.1.yaml")
+    assert entry.deployment_profile_path == Path(
+        "configs/deployments/glm-v5.1-vllm-ascend-prefill.yaml"
+    )
     assert entry.tokenizer_profile == "glm-v5"
     assert entry.chat_template_profile == "glm-v5"
+    assert entry.default_cache.hbm_capacity_blocks == 4096
+    assert entry.default_cache.ddr_capacity_blocks is None
+    assert entry.default_cache.block_size_tokens == 128
+    assert entry.default_cache.eviction_policy == "lru"
+    assert entry.default_cache.pooling.enabled is False
     assert entry.default_latency.name == "glm-v5.1__default_latency"
     assert entry.default_latency.model_name == "glm-v5.1"
     assert entry.default_latency.hardware_name == "ascend-a3-example"
@@ -24,6 +32,30 @@ def test_model_registry_parses_default_latency_profile() -> None:
     assert registry.entry_by_name == {"glm-v5.1": entry}
 
 
+def test_model_registry_parses_step7_pooling_defaults() -> None:
+    data = _registry_mapping()
+    data["models"]["glm-v5.1"]["default_cache"]["ddr_capacity_blocks"] = 65536
+    data["models"]["glm-v5.1"]["default_cache"]["pooling"] = {
+        "enabled": True,
+        "single_instance": True,
+        "multi_instance": False,
+        "ddr_enabled": True,
+        "remote_enabled": False,
+        "ssd_enabled": False,
+    }
+
+    registry = ModelRegistry.from_mapping(data)
+    cache = registry.entry_for("glm-v5.1").default_cache
+
+    assert cache.ddr_capacity_blocks == 65536
+    assert cache.pooling.enabled is True
+    assert cache.pooling.single_instance is True
+    assert cache.pooling.multi_instance is False
+    assert cache.pooling.ddr_enabled is True
+    assert cache.pooling.remote_enabled is False
+    assert cache.pooling.ssd_enabled is False
+
+
 def test_model_registry_loads_from_yaml_file(tmp_path: Path) -> None:
     registry_path = tmp_path / "registry.yaml"
     registry_path.write_text(
@@ -31,7 +63,12 @@ def test_model_registry_loads_from_yaml_file(tmp_path: Path) -> None:
 models:
   glm-v5.1:
     model_profile_path: configs/models/glm-v5.1.yaml
+    deployment_profile_path: configs/deployments/glm-v5.1-vllm-ascend-prefill.yaml
     tokenizer_profile: glm-v5
+    default_cache:
+      hbm_capacity_blocks: 4096
+      block_size_tokens: 128
+      eviction_policy: lru
     default_latency:
       backend: fitted_ttft
       model_name: glm-v5.1
@@ -68,6 +105,40 @@ def test_model_registry_rejects_missing_default_latency() -> None:
         ModelRegistry.from_mapping(data)
 
 
+def test_model_registry_rejects_missing_deployment_profile_path() -> None:
+    data = _registry_mapping()
+    del data["models"]["glm-v5.1"]["deployment_profile_path"]
+
+    with pytest.raises(ValueError, match="deployment_profile_path is required"):
+        ModelRegistry.from_mapping(data)
+
+
+def test_model_registry_rejects_unsupported_default_cache_policy() -> None:
+    data = _registry_mapping()
+    data["models"]["glm-v5.1"]["default_cache"]["eviction_policy"] = "fifo"
+
+    with pytest.raises(ValueError, match="default_cache.eviction_policy only supports lru"):
+        ModelRegistry.from_mapping(data)
+
+
+def test_model_registry_rejects_non_positive_ddr_capacity() -> None:
+    data = _registry_mapping()
+    data["models"]["glm-v5.1"]["default_cache"]["ddr_capacity_blocks"] = 0
+
+    with pytest.raises(ValueError, match="ddr_capacity_blocks must be a positive integer"):
+        ModelRegistry.from_mapping(data)
+
+
+def test_model_registry_rejects_non_boolean_pooling_flag() -> None:
+    data = _registry_mapping()
+    data["models"]["glm-v5.1"]["default_cache"]["pooling"] = {
+        "enabled": "true",
+    }
+
+    with pytest.raises(ValueError, match="pooling.enabled must be a boolean"):
+        ModelRegistry.from_mapping(data)
+
+
 def test_model_registry_rejects_unsupported_default_latency_backend() -> None:
     data = _registry_mapping()
     data["models"]["glm-v5.1"]["default_latency"]["backend"] = "formula"
@@ -88,8 +159,16 @@ def _registry_mapping() -> dict[str, object]:
         "models": {
             "glm-v5.1": {
                 "model_profile_path": "configs/models/glm-v5.1.yaml",
+                "deployment_profile_path": (
+                    "configs/deployments/glm-v5.1-vllm-ascend-prefill.yaml"
+                ),
                 "tokenizer_profile": "glm-v5",
                 "chat_template_profile": "glm-v5",
+                "default_cache": {
+                    "hbm_capacity_blocks": 4096,
+                    "block_size_tokens": 128,
+                    "eviction_policy": "lru",
+                },
                 "default_latency": {
                     "backend": "fitted_ttft",
                     "model_name": "glm-v5.1",

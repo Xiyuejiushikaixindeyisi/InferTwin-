@@ -5,9 +5,8 @@ AIConfigurator, not the public GitHub project.  The open-source test/reference
 checkout is named ``aiconfigurator_git`` and lives behind
 ``infertwin.external.aiconfigurator_git``.
 
-Step1-Step6 do not invoke AIConfigurator from runner/report paths. Until a
-concrete schema conversion is implemented, calls fail explicitly with
-NotImplementedError.
+Default runner/report paths do not invoke AIConfigurator. Until a concrete
+schema conversion is implemented, calls fail explicitly with NotImplementedError.
 """
 
 from __future__ import annotations

@@ -1,8 +1,8 @@
 """External project adapter primitives.
 
 These helpers define process-execution boundaries for future adapters. They are
-not wired into `ExperimentRunner` in Step1-Step5; current replay uses internal
-latency backends only.
+not wired into the default replay runners; current replay uses internal latency
+backends unless a dedicated external adapter path is added.
 """
 
 from __future__ import annotations

@@ -15,12 +15,15 @@ from infertwin.experiment.sweep import (
 )
 from infertwin.report.tables import write_csv_table
 
+_CACHE_MODE_HBM_LRU = "batch_aware_hbm_lru"
+_CACHE_MODE_HBM_DDR_LRU = "batch_aware_hbm_ddr_lru"
+
 
 def write_capacity_sweep_report(
     result: CapacitySweepResult,
     output_dir: str | Path,
 ) -> CapacitySweepReportPaths:
-    """Write the standard Step6 CSV and Markdown report around typed results."""
+    """Write the standard capacity sweep CSV and Markdown report around typed results."""
 
     report_dir = Path(output_dir)
     report_dir.mkdir(parents=True, exist_ok=True)
@@ -60,10 +63,7 @@ def write_capacity_sweep_summary(
         "## Assumptions",
         "",
         "- Fixed-routing, multi-instance isolated replay.",
-        "- Finite instance-local HBM prefix cache.",
-        "- HBM eviction policy: lru.",
-        "- DDR / SSD cache hits are not modeled in Step6; DDR fields are reserved as 0.",
-        "- KV load latency is not modeled; TTFT comes from the configured latency backend.",
+        *_cache_assumption_lines(config_details),
         "- P90 target matching / hit floor search is not performed.",
         "- Cache event details are disabled by default and only dumped for selected capacities.",
         "",
@@ -72,13 +72,15 @@ def write_capacity_sweep_summary(
         f"- Latency backend: {_detail(config_details, 'latency_backend')}",
         f"- Model: {_detail(config_details, 'model_name')}",
         f"- Hardware: {_detail(config_details, 'hardware_name')}",
+        f"- Streaming cache mode: {_detail(config_details, 'streaming_cache_mode')}",
+        f"- Cache eviction policy: {_detail(config_details, 'streaming_cache_eviction_policy') or _detail(config_details, 'eviction_policy')}",
         f"- Capacities: {_format_sequence(config_details.get('capacities', ()))}",
         f"- Cache event capacities: {_format_sequence(config_details.get('cache_event_capacities', ()))}",
         "",
         "## Trace-Level Results",
         "",
-        "| hbm_capacity_blocks | kv_hit_rate | hbm_hit_rate | ddr_hit_rate | p90_ttft_ms | request_count | cache_event_count |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| hbm_capacity_blocks | kv_hit_rate | hbm_hit_rate | ddr_hit_rate | p90_ttft_ms | p90_kv_load_ms | request_count | cache_event_count |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for row in trace_rows:
         lines.append(
@@ -88,6 +90,7 @@ def write_capacity_sweep_summary(
             f"{row.hbm_hit_rate:.6f} | "
             f"{row.ddr_hit_rate:.6f} | "
             f"{row.p90_ttft_ms:.6f} | "
+            f"{row.p90_kv_load_ms:.6f} | "
             f"{row.request_count} | "
             f"{row.cache_event_count} |"
         )
@@ -115,7 +118,7 @@ def write_capacity_sweep_summary(
             "## Notes",
             "",
             "- `capacity_sweep.csv` contains both trace and instance scope rows.",
-            "- Instance rows set `cache_event_count` to 0 in Step6 v1; this means instance-level event count is not provided.",
+            "- Instance rows set `cache_event_count` to 0; this means instance-level event count is not provided.",
             "- Use `scope=trace` rows for whole-trace capacity comparisons.",
             "- Use `scope=instance` rows to inspect fixed-routing instance imbalance.",
         ]
@@ -141,6 +144,33 @@ def _csv_value(value: object) -> object:
 
 def _detail(config_details: Mapping[str, object], key: str) -> object:
     return config_details.get(key, "")
+
+
+def _cache_assumption_lines(config_details: Mapping[str, object]) -> list[str]:
+    cache_mode = config_details.get("streaming_cache_mode")
+    if cache_mode == _CACHE_MODE_HBM_DDR_LRU:
+        return [
+            "- Finite instance-local HBM prefix cache.",
+            "- Finite instance-local DDR/CPU prefix cache is enabled.",
+            "- DDR hit accounting is modeled in `ddr_hit_tokens` and `ddr_hit_rate`.",
+            "- DDR KV load latency is modeled when configured by Step8 `KVLoadLatencyProfile`.",
+            "- DDR hit promotion to HBM is not modeled in Step7.",
+            "- Cross-instance KV pooling is not modeled.",
+            "- HBM and DDR eviction policy: lru.",
+        ]
+    if cache_mode == _CACHE_MODE_HBM_LRU:
+        return [
+            "- Finite instance-local HBM prefix cache.",
+            "- DDR / SSD cache hits are not modeled in this mode; DDR fields are reserved as 0.",
+            "- KV load metrics remain 0 unless the replay mode produces DDR hits and Step8 KV load is configured.",
+            "- HBM eviction policy: lru.",
+        ]
+    return [
+        "- Finite instance-local HBM prefix cache.",
+        "- DDR / SSD cache hits are not modeled unless the streaming cache mode enables them.",
+        "- KV load latency is modeled only when configured by Step8 `KVLoadLatencyProfile`.",
+        "- HBM eviction policy: lru.",
+    ]
 
 
 def _format_sequence(value: object) -> str:

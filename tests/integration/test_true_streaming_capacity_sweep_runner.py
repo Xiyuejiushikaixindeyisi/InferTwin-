@@ -10,6 +10,7 @@ from infertwin.report.sweep import write_capacity_sweep_report
 from infertwin.streaming.sweep import (
     STREAMING_CAPACITY_SWEEP_MODE,
     StreamingCapacitySweepRunner,
+    build_streaming_capacity_sweep_config,
 )
 
 
@@ -102,6 +103,39 @@ def test_streaming_capacity_sweep_runner_reports_model_default_latency_sources(
     assert instance_b.p90_ttft_ms == instance_a.p90_ttft_ms * 3
     assert result.config_details["model_registry_enabled"] is True
     assert result.config_details["model_registry_profile_path"] == str(model_registry_path)
+    assert result.config_details["instance_runtime_enabled"] is True
+    assert result.config_details["runtime_model_by_instance"] == {
+        "instance-a": "glm-v5.1",
+        "instance-b": "glm-v5.1",
+    }
+    assert result.config_details["model_default_cache_by_instance"] == {
+        "instance-a": {
+            "model_name": "glm-v5.1",
+            "hbm_capacity_blocks": 4096,
+            "ddr_capacity_blocks": None,
+            "block_size_tokens": 128,
+            "eviction_policy": "lru",
+            "pooling_enabled": False,
+            "single_instance_pooling_enabled": True,
+            "multi_instance_pooling_enabled": False,
+            "ddr_enabled": False,
+            "remote_pooling_enabled": False,
+            "ssd_pooling_enabled": False,
+        },
+        "instance-b": {
+            "model_name": "glm-v5.1",
+            "hbm_capacity_blocks": 4096,
+            "ddr_capacity_blocks": None,
+            "block_size_tokens": 128,
+            "eviction_policy": "lru",
+            "pooling_enabled": False,
+            "single_instance_pooling_enabled": True,
+            "multi_instance_pooling_enabled": False,
+            "ddr_enabled": False,
+            "remote_pooling_enabled": False,
+            "ssd_pooling_enabled": False,
+        },
+    }
     assert result.config_details["latency_source_by_instance"] == {
         "instance-a": "instance_profile",
         "instance-b": "model_default",
@@ -163,6 +197,25 @@ def test_streaming_capacity_sweep_runner_dumps_selected_cache_events(
     assert paths.summary_path.is_file()
     summary = paths.summary_path.read_text(encoding="utf-8")
     assert "capacity_1/cache_events.csv" in summary
+
+
+def test_streaming_capacity_sweep_config_rejects_disabled_sorted_trace_guard(
+    tmp_path: Path,
+) -> None:
+    config = _config(
+        tmp_path / "trace.csv",
+        mode=STREAMING_CAPACITY_SWEEP_MODE,
+        output_dir=tmp_path / "streaming_reports",
+        capacities=[4],
+        cache_events=False,
+    )
+    config["streaming"] = {"require_sorted_trace": False}
+
+    with pytest.raises(
+        ValueError,
+        match="streaming.require_sorted_trace=false is not supported in InferTwin V1",
+    ):
+        build_streaming_capacity_sweep_config(config)
 
 
 def test_streaming_capacity_sweep_package_cli_writes_report(tmp_path: Path) -> None:
@@ -395,6 +448,29 @@ def _write_model_registry(tmp_path: Path, *, default_slope: float) -> Path:
         ),
         encoding="utf-8",
     )
+    deployment_profile_path = tmp_path / "glm-v5.1-deployment.yaml"
+    deployment_profile_path.write_text(
+        yaml.safe_dump(
+            {
+                "deployment": {
+                    "name": "glm-v5-shared-deployment",
+                    "engine": "vllm-ascend",
+                    "scheduler": {
+                        "max_num_seqs": 32,
+                        "max_num_batched_tokens": 8192,
+                        "enable_chunked_prefill": True,
+                    },
+                    "cache_features": {
+                        "prefix_caching": True,
+                        "pooling": False,
+                        "runtime_block_size": 128,
+                    },
+                }
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
 
     registry_path = tmp_path / "model_registry.yaml"
     registry_path.write_text(
@@ -403,8 +479,14 @@ def _write_model_registry(tmp_path: Path, *, default_slope: float) -> Path:
                 "models": {
                     "glm-v5.1": {
                         "model_profile_path": str(model_profile_path),
+                        "deployment_profile_path": str(deployment_profile_path),
                         "tokenizer_profile": "glm-v5",
                         "chat_template_profile": "glm-v5",
+                        "default_cache": {
+                            "hbm_capacity_blocks": 4096,
+                            "block_size_tokens": 128,
+                            "eviction_policy": "lru",
+                        },
                         "default_latency": {
                             "backend": "fitted_ttft",
                             "model_name": "glm-v5.1",

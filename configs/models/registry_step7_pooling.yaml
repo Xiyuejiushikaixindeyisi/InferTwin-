@@ -1,0 +1,32 @@
+models:
+  glm-v5.1:
+    model_profile_path: glm-v5.1.yaml
+    deployment_profile_path: ../deployments/glm-v5.1-vllm-ascend-prefill-pooling.yaml
+    tokenizer_profile: glm-v5
+    chat_template_profile: glm-v5
+    default_cache:
+      hbm_capacity_blocks: 4096
+      ddr_capacity_blocks: 65536
+      block_size_tokens: 128
+      eviction_policy: lru
+      pooling:
+        enabled: true
+        single_instance: true
+        multi_instance: false
+        ddr_enabled: true
+        remote_enabled: false
+        ssd_enabled: false
+    default_latency:
+      backend: fitted_ttft
+      model_name: glm-v5.1
+      hardware_name: ascend-a3-example
+      fitted_ttft:
+        profile: glm-v5.1_default_ttft
+        function: token_linear_v1
+        intercept_ms: 0.0
+        ms_per_uncached_token: 0.01
+        calibrated_from: default_registry
+        calibration_window_requests: 500
+      kv_load:
+        ddr_ms_per_cached_token: 0.0
+        remote_ms_per_cached_token: 0.0

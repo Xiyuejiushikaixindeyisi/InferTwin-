@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 
 @dataclass(frozen=True, slots=True)
@@ -315,23 +315,85 @@ class FittedTTFTProfile:
 
 @dataclass(frozen=True, slots=True)
 class KVLoadLatencyProfile:
-    """Per-token KV load latency hyperparameters for non-HBM cache hits."""
+    """KV load latency hyperparameters for non-HBM cache hits."""
 
+    mode: Literal["zero", "token_linear_v1", "byte_linear_v1"] = "zero"
+    aggregation: Literal["shared_link_sum"] = "shared_link_sum"
+    overlap_mode: Literal["none_v1"] = "none_v1"
+    transfer_path: str = "local_ddr_cpu"
+    ddr_fixed_overhead_ms: float = 0.0
     ddr_ms_per_cached_token: float = 0.0
+    ddr_ms_per_byte: float = 0.0
     remote_ms_per_cached_token: float = 0.0
+    calibrated_from: str = "manual_default"
 
     @classmethod
     def from_mapping(cls, data: object | None, *, field_name: str) -> "KVLoadLatencyProfile":
-        mapping = _optional_mapping(data or {})
+        mapping = _optional_mapping({} if data is None else data)
+        ddr_fixed_overhead_ms = _non_negative_float(
+            mapping.get("ddr_fixed_overhead_ms", 0.0),
+            field_name=f"{field_name}.ddr_fixed_overhead_ms",
+        )
+        ddr_ms_per_cached_token = _non_negative_float(
+            mapping.get("ddr_ms_per_cached_token", 0.0),
+            field_name=f"{field_name}.ddr_ms_per_cached_token",
+        )
+        ddr_ms_per_byte = _non_negative_float(
+            mapping.get("ddr_ms_per_byte", 0.0),
+            field_name=f"{field_name}.ddr_ms_per_byte",
+        )
+        remote_ms_per_cached_token = _non_negative_float(
+            mapping.get("remote_ms_per_cached_token", 0.0),
+            field_name=f"{field_name}.remote_ms_per_cached_token",
+        )
+        mode = _parse_kv_load_mode(
+            mapping.get("mode"),
+            field_name=field_name,
+            has_nonzero_coefficients=any(
+                value > 0.0
+                for value in (
+                    ddr_fixed_overhead_ms,
+                    ddr_ms_per_cached_token,
+                    ddr_ms_per_byte,
+                    remote_ms_per_cached_token,
+                )
+            ),
+        )
+        aggregation = _literal(
+            mapping.get("aggregation", "shared_link_sum"),
+            allowed=("shared_link_sum",),
+            field_name=f"{field_name}.aggregation",
+        )
+        overlap_mode = _literal(
+            mapping.get("overlap_mode", "none_v1"),
+            allowed=("none_v1",),
+            field_name=f"{field_name}.overlap_mode",
+        )
+        transfer_path = _optional_str(
+            mapping.get("transfer_path"),
+            field_name=f"{field_name}.transfer_path",
+        ) or "local_ddr_cpu"
+        calibrated_from = _optional_str(
+            mapping.get("calibrated_from"),
+            field_name=f"{field_name}.calibrated_from",
+        ) or "manual_default"
+        _validate_kv_load_coefficients(
+            mode=mode,
+            field_name=field_name,
+            ddr_fixed_overhead_ms=ddr_fixed_overhead_ms,
+            ddr_ms_per_cached_token=ddr_ms_per_cached_token,
+            ddr_ms_per_byte=ddr_ms_per_byte,
+        )
         return cls(
-            ddr_ms_per_cached_token=_non_negative_float(
-                mapping.get("ddr_ms_per_cached_token", 0.0),
-                field_name=f"{field_name}.ddr_ms_per_cached_token",
-            ),
-            remote_ms_per_cached_token=_non_negative_float(
-                mapping.get("remote_ms_per_cached_token", 0.0),
-                field_name=f"{field_name}.remote_ms_per_cached_token",
-            ),
+            mode=mode,
+            aggregation=aggregation,
+            overlap_mode=overlap_mode,
+            transfer_path=transfer_path,
+            ddr_fixed_overhead_ms=ddr_fixed_overhead_ms,
+            ddr_ms_per_cached_token=ddr_ms_per_cached_token,
+            ddr_ms_per_byte=ddr_ms_per_byte,
+            remote_ms_per_cached_token=remote_ms_per_cached_token,
+            calibrated_from=calibrated_from,
         )
 
 
@@ -479,6 +541,48 @@ def _parse_instance_deployment(
     )
 
 
+def _parse_kv_load_mode(
+    value: object,
+    *,
+    field_name: str,
+    has_nonzero_coefficients: bool,
+) -> Literal["zero", "token_linear_v1", "byte_linear_v1"]:
+    if value is None:
+        if has_nonzero_coefficients:
+            raise ValueError(f"{field_name}.mode is required when KV load coefficients are non-zero")
+        return "zero"
+    mode = _literal(
+        value,
+        allowed=("zero", "token_linear_v1", "byte_linear_v1"),
+        field_name=f"{field_name}.mode",
+    )
+    return cast(Literal["zero", "token_linear_v1", "byte_linear_v1"], mode)
+
+
+def _validate_kv_load_coefficients(
+    *,
+    mode: str,
+    field_name: str,
+    ddr_fixed_overhead_ms: float,
+    ddr_ms_per_cached_token: float,
+    ddr_ms_per_byte: float,
+) -> None:
+    if mode == "zero":
+        if (
+            ddr_fixed_overhead_ms > 0
+            or ddr_ms_per_cached_token > 0
+            or ddr_ms_per_byte > 0
+        ):
+            raise ValueError(f"{field_name} mode=zero requires DDR coefficients to be zero")
+        return
+    if mode == "token_linear_v1" and ddr_ms_per_byte > 0:
+        raise ValueError(f"{field_name}.ddr_ms_per_byte is only valid for byte_linear_v1")
+    if mode == "byte_linear_v1" and ddr_ms_per_cached_token > 0:
+        raise ValueError(
+            f"{field_name}.ddr_ms_per_cached_token is only valid for token_linear_v1"
+        )
+
+
 def _section(data: object, section_name: str) -> dict[str, Any]:
     mapping = _mapping(data, section_name)
     if section_name in mapping:
@@ -516,6 +620,14 @@ def _optional_str(value: object, *, field_name: str) -> str | None:
     if value is None:
         return None
     return _non_empty_str(value, field_name=field_name)
+
+
+def _literal(value: object, *, allowed: tuple[str, ...], field_name: str) -> str:
+    parsed = _non_empty_str(value, field_name=field_name)
+    if parsed not in allowed:
+        allowed_values = ", ".join(allowed)
+        raise ValueError(f"{field_name} must be one of: {allowed_values}")
+    return parsed
 
 
 def _non_empty_str(value: object, *, field_name: str) -> str:

@@ -8,6 +8,8 @@ from infertwin.latency.instance_resolver import (
     build_instance_latency_config,
     build_model_registry_config,
 )
+from infertwin.latency.profile import ServingLatencyProfile
+from infertwin.scheduler.batch_shape import BatchShape, ScheduledSlice
 
 
 def test_instance_latency_resolver_falls_back_to_global_backend() -> None:
@@ -44,18 +46,28 @@ def test_instance_latency_resolver_returns_backend_by_instance_uuid(tmp_path: Pa
         "instance-b": "instance-b-ttft",
     }
     assert resolver.instance_profile_count == 2
-    assert isinstance(backend_a, FittedTTFTLatencyBackend)
-    assert isinstance(backend_b, FittedTTFTLatencyBackend)
+    assert isinstance(backend_a, ServingLatencyProfile)
+    assert isinstance(backend_b, ServingLatencyProfile)
     assert backend_a.profile == "instance-a-ttft"
     assert backend_a.model_name == "glm-v5.1"
     assert backend_a.hardware_name == "ascend-a3-fast"
-    assert backend_a.ms_per_uncached_token == 0.01
+    assert isinstance(backend_a.ttft_backend, FittedTTFTLatencyBackend)
+    assert backend_a.ttft_backend.ms_per_uncached_token == 0.01
     assert backend_b.profile == "instance-b-ttft"
     assert backend_b.hardware_name == "ascend-a3-slow"
-    assert backend_b.ms_per_uncached_token == 0.02
+    assert isinstance(backend_b.ttft_backend, FittedTTFTLatencyBackend)
+    assert backend_b.ttft_backend.ms_per_uncached_token == 0.02
     assert resolver.metadata_for("instance-a").source == "instance_profile"
     assert resolver.metadata_for("instance-a").calibration_status == "configured"
     assert resolver.backend_for("instance-a") is backend_a
+
+    result = backend_a.estimate_iteration(_shape(kv_load_tokens=10))
+
+    assert result.duration_ms == pytest.approx(2.08)
+    assert result.details["ttft_ms"] == pytest.approx(0.08)
+    assert result.details["kv_load_ms"] == pytest.approx(2.0)
+    assert result.details["kv_load_mode"] == "token_linear_v1"
+    assert result.details["kv_load_calibrated_from"] == "instance-profile-kv-load"
 
 
 def test_instance_latency_resolver_fails_on_missing_instance(tmp_path: Path) -> None:
@@ -131,6 +143,11 @@ instances:
         ms_per_uncached_token: 0.010
         calibrated_from: synthetic
         calibration_window_requests: 500
+      kv_load:
+        mode: token_linear_v1
+        ddr_fixed_overhead_ms: 1.0
+        ddr_ms_per_cached_token: 0.1
+        calibrated_from: instance-profile-kv-load
     instance-b-ttft:
       backend: fitted_ttft
       model_name: glm-v5.1
@@ -153,3 +170,28 @@ instances:
         encoding="utf-8",
     )
     return path
+
+
+def _shape(
+    *,
+    kv_load_tokens: int = 0,
+    kv_load_bytes: int = 0,
+) -> BatchShape:
+    return BatchShape(
+        instance_uuid="instance-a",
+        iteration_id=0,
+        start_time_ms=0.0,
+        request_slices=(
+            ScheduledSlice(
+                request_id="r0",
+                scheduled_prefill_tokens=8,
+                computed_tokens_before=0,
+                computed_tokens_after=8,
+                prompt_tokens=8,
+                cached_prefix_tokens=0,
+                previous_chunk_tokens=0,
+                kv_load_tokens=kv_load_tokens,
+                kv_load_bytes=kv_load_bytes,
+            ),
+        ),
+    )

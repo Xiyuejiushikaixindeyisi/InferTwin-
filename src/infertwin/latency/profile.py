@@ -93,7 +93,7 @@ class StaticLatencyComponent:
 def _zero_kv_load_component() -> ZeroLatencyComponent:
     return ZeroLatencyComponent(
         name="kv_load",
-        reason="kv_load_latency_not_modeled_in_current_hbm_only_replay",
+        reason="kv_load_latency_disabled_by_profile",
     )
 
 
@@ -145,10 +145,22 @@ class ServingLatencyProfile:
         return self.ttft_backend.hardware_name
 
     def estimate_iteration(self, shape: BatchShape) -> LatencyResult:
-        ttft = self.ttft_backend.estimate_iteration(shape)
+        load_only = shape.scheduled_prefill_tokens == 0 and shape.kv_load_request_count > 0
+        if load_only:
+            ttft_backend = self.ttft_backend.name
+            ttft_ms = 0.0
+            ttft_details: dict[str, DetailValue] = {
+                "reason": "load_only_kv_load",
+                "scheduled_prefill_tokens": 0,
+            }
+        else:
+            ttft = self.ttft_backend.estimate_iteration(shape)
+            ttft_backend = ttft.backend
+            ttft_ms = ttft.duration_ms
+            ttft_details = ttft.details
         queue = self.queue_component.estimate_iteration(shape)
         kv_load = self.kv_load_component.estimate_iteration(shape)
-        duration_ms = queue.duration_ms + ttft.duration_ms + kv_load.duration_ms
+        duration_ms = queue.duration_ms + ttft_ms + kv_load.duration_ms
         shape_key = ShapeKey.from_shape(
             backend=self.name,
             model_name=self.model_name,
@@ -163,8 +175,8 @@ class ServingLatencyProfile:
                 "profile": self.profile,
                 "calibrated_from": self.calibrated_from,
                 "calibration_window_requests": self.calibration_window_requests,
-                "ttft_backend": ttft.backend,
-                "ttft_ms": ttft.duration_ms,
+                "ttft_backend": ttft_backend,
+                "ttft_ms": ttft_ms,
                 "queue_component": queue.name,
                 "queue_ms": queue.duration_ms,
                 "queue_modeled": queue.modeled,
@@ -173,7 +185,7 @@ class ServingLatencyProfile:
                 "kv_load_modeled": kv_load.modeled,
                 "decode_mode": self.decode_mode,
                 "tpot_mode": "not_modeled_in_current_replay",
-                **_prefixed_details("ttft", ttft.details),
+                **_prefixed_details("ttft", ttft_details),
                 **_prefixed_details("queue", queue.details),
                 **_prefixed_details("kv_load", kv_load.details),
             },

@@ -3,14 +3,36 @@ import pytest
 from infertwin.cache.event_sink import CacheEventStats
 from infertwin.experiment.sweep import build_capacity_rows
 from infertwin.replay.metrics import BatchAwareRequestMetrics, IterationMetrics
+from infertwin.replay.timeline import LEGACY_TIMELINE_MODE
 from infertwin.streaming.metrics import CapacitySweepStreamingMetricAggregator
 
 
 def test_streaming_capacity_metric_aggregator_matches_batch_rows() -> None:
     request_metrics = (
-        _request_metric("r1", "instance-b", prompt_tokens=10, hbm_hit_tokens=4, ttft_ms=30.0),
-        _request_metric("r2", "instance-a", prompt_tokens=10, hbm_hit_tokens=10, ttft_ms=10.0),
-        _request_metric("r3", "instance-a", prompt_tokens=10, hbm_hit_tokens=0, ttft_ms=20.0),
+        _request_metric(
+            "r1",
+            "instance-b",
+            prompt_tokens=10,
+            hbm_hit_tokens=4,
+            ttft_ms=30.0,
+            kv_load_ms=3.0,
+        ),
+        _request_metric(
+            "r2",
+            "instance-a",
+            prompt_tokens=10,
+            hbm_hit_tokens=10,
+            ttft_ms=10.0,
+            kv_load_ms=0.0,
+        ),
+        _request_metric(
+            "r3",
+            "instance-a",
+            prompt_tokens=10,
+            hbm_hit_tokens=0,
+            ttft_ms=20.0,
+            kv_load_ms=2.0,
+        ),
     )
     iteration_metrics = (
         _iteration_metric("instance-a", 0),
@@ -38,8 +60,12 @@ def test_streaming_capacity_metric_aggregator_matches_batch_rows() -> None:
     )
 
     assert streaming_rows == batch_rows
+    assert streaming_rows[0].total_kv_load_ms == 5.0
+    assert streaming_rows[0].avg_kv_load_ms == pytest.approx(5.0 / 3)
+    assert streaming_rows[0].p90_kv_load_ms == 3.0
     assert aggregator.request_count == 3
     assert aggregator.iteration_count == 3
+    assert request_metrics[0].timeline_mode == LEGACY_TIMELINE_MODE
 
 
 def test_streaming_capacity_metric_aggregator_emits_empty_trace_row() -> None:
@@ -54,6 +80,8 @@ def test_streaming_capacity_metric_aggregator_emits_empty_trace_row() -> None:
     assert rows[0].iteration_count == 0
     assert rows[0].kv_hit_rate == 0.0
     assert rows[0].p90_ttft_ms == 0.0
+    assert rows[0].total_kv_load_ms == 0.0
+    assert rows[0].p90_kv_load_ms == 0.0
     assert rows[0].cache_event_count == 7
 
 
@@ -97,6 +125,7 @@ def _request_metric(
     prompt_tokens: int,
     hbm_hit_tokens: int,
     ttft_ms: float,
+    kv_load_ms: float = 0.0,
 ) -> BatchAwareRequestMetrics:
     return BatchAwareRequestMetrics(
         request_id=request_id,
@@ -116,6 +145,7 @@ def _request_metric(
         miss_tokens=prompt_tokens - hbm_hit_tokens,
         effective_hit_rate=hbm_hit_tokens / prompt_tokens,
         scheduled_iteration_count=1,
+        kv_load_ms=kv_load_ms,
     )
 
 

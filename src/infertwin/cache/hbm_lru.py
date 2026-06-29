@@ -120,6 +120,7 @@ class HBMCache:
         now_ms: float,
         request_id: str = "",
         instance_uuid: str = "",
+        reason: str = "finish_time_materialization",
     ) -> None:
         for block in blocks:
             existing = self._blocks.get(block.block_key)
@@ -154,7 +155,7 @@ class HBMCache:
                 request_id=request_id,
                 instance_uuid=instance_uuid,
                 block=block,
-                reason="finish_time_materialization",
+                reason=reason,
             )
 
     def take_events(self) -> tuple[CacheEvent, ...]:

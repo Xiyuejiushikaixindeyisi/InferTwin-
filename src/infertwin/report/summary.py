@@ -76,6 +76,8 @@ def write_batch_aware_summary(
     )
     ttft_values = [item.ttft_ms for item in request_metrics]
     scheduler_wait_values = [item.scheduler_wait_ms for item in request_metrics]
+    kv_load_values = [item.kv_load_ms for item in request_metrics]
+    total_kv_load_ms = sum(kv_load_values)
 
     output_path.write_text(
         "\n".join(
@@ -89,7 +91,7 @@ def write_batch_aware_summary(
                 "- vLLM-like FCFS continuous batching approximation.",
                 "- Chunked prefill is controlled by InferTwin replay.",
                 "- Queue time outside model service is not modeled.",
-                "- HBM / DDR KV load time is not modeled in this replay mode.",
+                "- DDR KV load latency is modeled when configured by Step8 `KVLoadLatencyProfile`.",
                 "- Decode TPOT interference is not modeled.",
                 "",
                 "Latency backend:",
@@ -119,10 +121,18 @@ def write_batch_aware_summary(
                 f"- P90 scheduler wait ms: {_percentile(scheduler_wait_values, 90):.6f}",
                 f"- P99 scheduler wait ms: {_percentile(scheduler_wait_values, 99):.6f}",
                 "",
+                "KV load latency:",
+                "",
+                f"- Total KV load ms: {total_kv_load_ms:.6f}",
+                f"- P50 KV load ms: {_percentile(kv_load_values, 50):.6f}",
+                f"- P90 KV load ms: {_percentile(kv_load_values, 90):.6f}",
+                f"- P99 KV load ms: {_percentile(kv_load_values, 99):.6f}",
+                "",
                 "Iteration metrics:",
                 "",
                 f"- Iterations: {len(iteration_metrics)}",
                 f"- Total scheduled prefill tokens: {sum(item.scheduled_prefill_tokens for item in iteration_metrics)}",
+                f"- Total iteration KV load ms: {sum(item.kv_load_ms for item in iteration_metrics):.6f}",
                 f"- Total iteration duration ms: {sum(item.duration_ms for item in iteration_metrics):.6f}",
                 *_cache_event_lines(cache_details, cache_events, cache_event_stats),
                 "",

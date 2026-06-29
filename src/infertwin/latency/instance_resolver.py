@@ -18,6 +18,8 @@ from infertwin.config.profiles import InstanceLatencyProfile, InstanceProfile
 from infertwin.latency.backend import BatchLatencyBackend
 from infertwin.latency.factory import build_batch_latency_backend
 from infertwin.latency.fitted_ttft import FittedTTFTLatencyBackend
+from infertwin.latency.kv_load import build_kv_load_component
+from infertwin.latency.profile import ServingLatencyProfile
 
 
 @dataclass(frozen=True, slots=True)
@@ -255,7 +257,10 @@ def _load_model_registry(
     if profile_path is None:
         return None, None
     model_registry = ModelRegistry.from_mapping(load_yaml(profile_path))
-    return model_registry, validate_model_registry(model_registry)
+    return model_registry, validate_model_registry(
+        model_registry,
+        base_dir=profile_path.parent,
+    )
 
 
 def _validate_instance_bindings(
@@ -278,7 +283,7 @@ def _build_instance_latency_backend(profile: InstanceLatencyProfile) -> BatchLat
     if profile.backend != "fitted_ttft":
         raise ValueError(f"unsupported instance latency backend: {profile.backend}")
     fitted = profile.fitted_ttft
-    return FittedTTFTLatencyBackend(
+    ttft_backend = FittedTTFTLatencyBackend(
         profile=fitted.profile,
         function=fitted.function,
         intercept_ms=fitted.intercept_ms,
@@ -286,6 +291,13 @@ def _build_instance_latency_backend(profile: InstanceLatencyProfile) -> BatchLat
         calibrated_from=fitted.calibrated_from,
         model_name=profile.model_name,
         hardware_name=profile.hardware_name,
+    )
+    return ServingLatencyProfile(
+        profile=profile.name,
+        ttft_backend=ttft_backend,
+        kv_load_component=build_kv_load_component(profile.kv_load),
+        calibrated_from=fitted.calibrated_from,
+        calibration_window_requests=fitted.calibration_window_requests,
     )
 
 

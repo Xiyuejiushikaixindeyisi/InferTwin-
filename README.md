@@ -18,11 +18,15 @@ InferTwin/
 
 ## First Commands
 
+Use `sweep-streaming` for large traces. `simulate` and `sweep` are kept for
+small traces, local debugging, and regression checks because they use in-memory
+request/result paths.
+
 ```bash
 PYTHONPATH=src python -m infertwin.cli.main --help
+PYTHONPATH=src python -m infertwin.cli.main sweep-streaming --config <streaming_capacity_sweep.yaml>
 PYTHONPATH=src python -m infertwin.cli.main simulate --config configs/experiments/default.yaml
 PYTHONPATH=src python -m infertwin.cli.main sweep --config configs/experiments/step6_capacity_sweep.yaml
-PYTHONPATH=src python -m infertwin.cli.main sweep-streaming --config <streaming_capacity_sweep.yaml>
 PYTHONPATH=src python -m infertwin.cli.main normalize-trace --input <unrouted.csv> --output <routed.csv> --instance-uuid <instance>
 python scripts/run_simulation.py --config configs/experiments/default.yaml
 pytest
@@ -31,14 +35,19 @@ pytest
 When InferTwin is installed as a package, the formal entrypoint is:
 
 ```bash
+infertwin sweep-streaming --config <streaming_capacity_sweep.yaml>
 infertwin simulate --config configs/experiments/default.yaml
 infertwin sweep --config configs/experiments/step6_capacity_sweep.yaml
-infertwin sweep-streaming --config <streaming_capacity_sweep.yaml>
 infertwin validate-trace --input data/samples/sample_trace.csv
 infertwin normalize-trace --input <unrouted.csv> --output <routed.csv> --instance-uuid <instance>
 ```
 
 The scripts in `scripts/` are thin wrappers for local development.
+
+`validate-trace` is currently a small-trace validation helper and still reads the
+trace into memory. It will be replaced by streaming validation in a later V2
+engineering pass; do not use the current command directly on 11G production
+traces.
 
 The current repository contains the maintainable project skeleton and stable extension points for latency backends such as AIConfigurator, MKsim, and Ramulator2.
 
@@ -73,7 +82,8 @@ needs different semantics, add a new replay mode, cache backend, policy, adapter
 or result schema instead of changing existing meanings in place.
 
 Every new stage or development batch must explicitly state whether it develops
-the core simulator or an outer capability.
+the core simulator or an outer capability. New outer capabilities should wait
+until the V1 core simulator exit criteria are satisfied.
 
 ## Current Status
 
@@ -88,6 +98,7 @@ Step1-Step6 have built the core offline replay skeleton:
 - fitted TTFT latency backend.
 - instance latency profiles for true streaming replay.
 - model registry and instance-to-model binding for default TTFT fallback.
+- model-owned runtime defaults for streaming request build and replay setup.
 - calibration-failure fallback policy schema for future external TTFT calibration.
 - infinite HBM replay and finite HBM LRU replay.
 - vLLM-like cached-token accounting for replay metrics.
@@ -116,8 +127,8 @@ Step6 v1 boundaries:
 
 The core-simulator engineering optimization stage, true streaming architecture
 task, and Pre-Step7 model registry / instance model binding cleanup are complete.
-InferTwin is ready to enter Step7 after the next stage scope is declared as either
-core simulator work or an outer capability.
+V1 review repair has completed strict E2E validation and has been archived under
+`docs/archive/v1_review_repair/`. The next core-simulator stage is Step7.
 
 For large traces, use the opt-in streaming path:
 
@@ -161,10 +172,11 @@ PYTHONPATH=src python -m infertwin.cli.main sweep-streaming \
   --config configs/experiments/streaming_capacity_sweep_instance_latency.yaml
 ```
 
-Current scope: this selects latency backend by `instance_uuid`. It does not yet
-provide per-instance scheduler config, per-instance cache capacity, dynamic
-per-500-request refit, DDR / remote KV-load latency materialization, or gateway
-routing simulation.
+Current scope: this selects latency backend by `instance_uuid` and uses
+model-bound runtime defaults for tokenizer selection, scheduler setup, block size
+conversion, and model default cache metadata in `sweep-streaming`. It does not
+yet provide dynamic per-500-request refit, DDR / remote KV-load latency
+materialization, or gateway routing simulation.
 
 `model_registry` is an index from model name to model profile, tokenizer/chat
 profile, and default latency profile. `instance_latency` is the fixed-routed
@@ -194,22 +206,35 @@ For local throughput and memory observation:
   --output-json reports/streaming_benchmark/benchmark.json
 ```
 
-Future core-simulator capabilities:
+V1 core-simulator exit scope:
 
-- DDR / SSD / multi-tier cache.
-- KV load latency.
+- Step7: single-instance pooling, where one instance can hit KV cache from
+  DDR/CPU-side storage.
+- Step8: KV load latency modeling for non-HBM hits.
+- Step9: progressive chunk visibility, where generated full chunks can become
+  cache-hit candidates before the whole prompt finishes. TTFT prefill time must
+  be composed from uncached-token chunks instead of one whole-request formula.
+
+V2-or-later core-simulator scope:
+
+- complex Hybrid model cache semantics, including Qwen3.6 / DeepSeekV4-style
+  cache groups and non-uniform block assumptions.
 - gateway routing simulation.
 - instance-side queueing policy simulation.
+- multi-instance pooling / cross-instance KV hit.
+- decode / TPOT modeling.
+- broad engineering optimization after V1 exit.
 - external AIConfigurator / MkSim production adapters.
-- cross-instance KV pooling.
-- progressive block visibility; this is required after Step7 as a new replay/cache mode.
-- decode / TPOT modeling when there is an explicit PD-colocated decode modeling need.
 
 Future outer capabilities:
 
 - target-based hit floor solver / P90 target matching.
 - dashboard / Web UI.
 - strategy comparison reports.
+
+New outer capabilities should be built only after V1 core simulator exit, so
+reports and product surfaces consume stable replay semantics instead of forcing
+core behavior changes from the outside.
 
 ## Document Index
 
@@ -246,6 +271,8 @@ docs/archive/true_streaming/
 docs/archive/step4/
 docs/archive/step5/
 docs/archive/step6/
+docs/archive/step7/
+docs/archive/step8/
 ```
 
 ## Latency Strategy
@@ -315,19 +342,21 @@ meaning.
   This is a conservative offline replay rule, not a physical vLLM block-manager
   timeline. Real vLLM / vLLM-Ascend deployments may expose full blocks
   progressively during prefill; InferTwin's `batch_aware_hbm_lru` mode does not.
-  If progressive block visibility is needed later, add a new replay/cache mode
-  instead of changing this mode's materialization semantics.
+  Step9 must add progressive chunk visibility as a new replay/cache mode instead
+  of changing this mode's materialization semantics.
 - `ttft_ms = finish_time_ms - arrival_time_ms`.
 - Request-level TTFT is modeled as
   `queue_waiting_ms + uncached_prefill_compute_ms + kv_load_ms`. Current replay
-  keeps `queue_waiting_ms = 0` and `kv_load_ms = 0`; instance latency profiles
-  currently control the fitted uncached prefill compute component.
+  keeps `queue_waiting_ms = 0`; Step8 lets `KVLoadLatencyProfile` control
+  `kv_load_ms` for DDR/CPU hits. The default `mode=zero` keeps legacy zero-load
+  behavior, while `token_linear` and `byte_linear` can add fitted/static KV load
+  latency.
 - `scheduler_wait_ms = first_scheduled_time_ms - arrival_time_ms`. For a zero-miss
   request, `first_scheduled_time_ms` is the time when the replay first considers
   and fast-finishes the request.
-- Step4 scope is fixed-routing, multi-instance isolated replay. Requests are
+- Current replay scope is fixed-routing, multi-instance isolated replay. Requests are
   grouped by `instance_uuid` from the trace, each instance replays independently,
   and InferTwin does not simulate routing decisions. Current core replay does not
-  model DDR, SSD, cross-instance KV pooling, PD ratio search, decode TPOT, or KV
-  transfer time. MTP/EAGLE-style drop-block effects are represented only in
+  model cross-instance KV pooling, PD ratio search, decode TPOT, or gateway
+  routing. MTP/EAGLE-style drop-block effects are represented only in
   cached-token accounting, not as real speculative decode execution.

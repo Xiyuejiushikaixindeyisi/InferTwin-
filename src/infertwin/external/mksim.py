@@ -1,8 +1,8 @@
 """MKsim adapter boundary.
 
-This module is a future integration contract, not a production adapter. Step1-
-Step5 do not invoke MKSim from runner/report paths. Until a concrete schema
-conversion is implemented, calls fail explicitly with NotImplementedError.
+This module is a future integration contract, not a production adapter. Default
+runner/report paths do not invoke MKSim. Until a concrete schema conversion is
+implemented, calls fail explicitly with NotImplementedError.
 """
 
 from __future__ import annotations

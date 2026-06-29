@@ -61,6 +61,7 @@ class InfiniteHBMCache:
         now_ms: float,
         request_id: str = "",
         instance_uuid: str = "",
+        reason: str = "finish_time_materialization",
     ) -> None:
         for block in blocks:
             self._blocks.setdefault(

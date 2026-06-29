@@ -36,6 +36,7 @@ class PrefixCache(Protocol):
         now_ms: float,
         request_id: str = "",
         instance_uuid: str = "",
+        reason: str = "finish_time_materialization",
     ) -> None: ...
 
     def take_events(self) -> tuple[CacheEvent, ...]: ...

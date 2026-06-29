@@ -6,7 +6,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Protocol
 
-from infertwin.cache.events import EVICT, LOOKUP_HIT, LOOKUP_MISS, MATERIALIZE, CacheEvent
+from infertwin.cache.events import EVICT, LOOKUP_HIT, LOOKUP_MISS, MATERIALIZE, STORE, CacheEvent
 
 
 @dataclass(slots=True)
@@ -16,8 +16,11 @@ class CacheEventStats:
     lookup_miss_events: int = 0
     materialize_events: int = 0
     evict_events: int = 0
+    store_events: int = 0
     peak_hbm_used_blocks: int = 0
     final_hbm_used_blocks: int = 0
+    peak_ddr_used_blocks: int = 0
+    final_ddr_used_blocks: int = 0
 
     def record(self, event: CacheEvent) -> None:
         self.total_events += 1
@@ -29,12 +32,19 @@ class CacheEventStats:
             self.materialize_events += 1
         elif event.event_type == EVICT:
             self.evict_events += 1
+        elif event.event_type == STORE:
+            self.store_events += 1
 
         self.peak_hbm_used_blocks = max(
             self.peak_hbm_used_blocks,
             event.hbm_used_blocks,
         )
         self.final_hbm_used_blocks = event.hbm_used_blocks
+        self.peak_ddr_used_blocks = max(
+            self.peak_ddr_used_blocks,
+            event.ddr_used_blocks,
+        )
+        self.final_ddr_used_blocks = event.ddr_used_blocks
 
     def snapshot(self) -> CacheEventStats:
         return CacheEventStats(
@@ -43,8 +53,11 @@ class CacheEventStats:
             lookup_miss_events=self.lookup_miss_events,
             materialize_events=self.materialize_events,
             evict_events=self.evict_events,
+            store_events=self.store_events,
             peak_hbm_used_blocks=self.peak_hbm_used_blocks,
             final_hbm_used_blocks=self.final_hbm_used_blocks,
+            peak_ddr_used_blocks=self.peak_ddr_used_blocks,
+            final_ddr_used_blocks=self.final_ddr_used_blocks,
         )
 
 

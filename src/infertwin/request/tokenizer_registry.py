@@ -100,8 +100,13 @@ class TokenizerRegistry:
         request: ParsedRequest,
         *,
         max_prompt_tokens: int | None = None,
+        tokenizer_profile: str | None = None,
     ) -> TokenizationResult:
-        profile = self.resolve_profile(request.model)
+        profile = (
+            self._profile_for_name(tokenizer_profile)
+            if tokenizer_profile is not None
+            else self.resolve_profile(request.model)
+        )
         token_ids = self._encode_with_profile(profile, request)
         prompt_tokens = len(token_ids)
         if max_prompt_tokens is not None and prompt_tokens > max_prompt_tokens:
@@ -121,6 +126,12 @@ class TokenizerRegistry:
             tokenizer_config_hash=file_sha256(tokenizer_config_path),
             kv_bytes_per_token=profile.kv_bytes_per_token,
         )
+
+    def _profile_for_name(self, tokenizer_profile: str) -> TokenizerProfile:
+        profile = self._profiles.get(tokenizer_profile)
+        if profile is None:
+            raise KeyError(f"Unknown tokenizer profile {tokenizer_profile!r}")
+        return profile
 
     def _encode_with_profile(
         self,

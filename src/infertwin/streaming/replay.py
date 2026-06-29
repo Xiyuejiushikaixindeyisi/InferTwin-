@@ -7,8 +7,11 @@ from infertwin.cache.event_sink import CacheEventSink, StatsOnlyCacheEventSink
 from infertwin.replay.event_loop import (
     BatchAwareReplayEngine,
     _drain_cache_events,
+    _record_initial_compute_wait,
+    _record_iteration_compute_wait,
     _state_from_request,
 )
+from infertwin.replay.kv_transfer import SharedLinkFIFOTransferQueue
 from infertwin.replay.metrics import (
     BatchAwareRequestMetrics,
     IterationMetrics,
@@ -53,6 +56,7 @@ class StreamingBatchAwareReplayEngine(BatchAwareReplayEngine):
         states_by_id: dict[str, RequestState] = {}
         requests_by_id = {}
         lookup_by_id: dict[str, LookupMetrics] = {}
+        transfer_queue = SharedLinkFIFOTransferQueue(instance_uuid=instance_uuid)
 
         while request_source.peek() is not None or waiting or running:
             arrival_seq = _move_arrivals_from_source(
@@ -63,6 +67,7 @@ class StreamingBatchAwareReplayEngine(BatchAwareReplayEngine):
                 waiting=waiting,
                 states_by_id=states_by_id,
                 requests_by_id=requests_by_id,
+                timeline_mode=self.timeline_mode,
             )
             max_active_requests = max(max_active_requests, len(states_by_id))
 
@@ -116,18 +121,29 @@ class StreamingBatchAwareReplayEngine(BatchAwareReplayEngine):
 
             latency = self._estimate_latency(schedule_result.shape)
             finish_ms = now_ms + latency.duration_ms
+            compute_wait = _record_iteration_compute_wait(
+                waiting=waiting,
+                running=running,
+                scheduled_request_ids={
+                    item.request_id for item in schedule_result.shape.request_slices
+                },
+                duration_ms=latency.duration_ms,
+                timeline_mode=self.timeline_mode,
+            )
             request_metrics = []
             iteration_metrics: list[IterationMetrics] = []
             self._apply_schedule_result(
                 schedule_result=schedule_result,
                 latency=latency,
                 finish_ms=finish_ms,
+                compute_wait=compute_wait,
                 cache=cache,
                 states_by_id=states_by_id,
                 requests_by_id=requests_by_id,
                 lookup_by_id=lookup_by_id,
                 request_metrics=request_metrics,
                 iteration_metrics=iteration_metrics,
+                transfer_queue=transfer_queue,
             )
             emitted_request_count += _emit_request_metrics(
                 request_metrics,
@@ -163,6 +179,7 @@ def _move_arrivals_from_source(
     waiting: WaitingQueue,
     states_by_id: dict[str, RequestState],
     requests_by_id: dict,
+    timeline_mode: str,
 ) -> int:
     while True:
         request = request_source.peek()
@@ -172,7 +189,12 @@ def _move_arrivals_from_source(
         _require_instance(request.instance_uuid, expected=instance_uuid)
         if request.request_id in states_by_id:
             raise ValueError(f"duplicate active request_id {request.request_id!r}")
-        state = _state_from_request(request, arrival_seq=arrival_seq)
+        state = _state_from_request(
+            request,
+            arrival_seq=arrival_seq,
+            timeline_mode=timeline_mode,
+        )
+        _record_initial_compute_wait(state=state, now_ms=now_ms)
         waiting.append(state)
         states_by_id[state.request_id] = state
         requests_by_id[state.request_id] = request

@@ -250,3 +250,88 @@ agent 发现以下迹象时，应主动提醒用户：
 - 哪些行为被测试覆盖。
 
 这些边界可以写在设计文档、模块 docstring、测试文件名或 README 中。原则是让后续维护者知道在哪里改、哪里不能改、出了问题先看哪里。
+
+## 13. 按改动等级选择开发和测试强度
+
+InferTwin 后续开发默认按风险分级，不用每次都做全项目审计，但核心路径不能降低要求。
+
+| 等级 | 类型 | 示例 | 最低要求 |
+| --- | --- | --- | --- |
+| L0 | 文档治理 | 文档、索引、记忆 | `git diff --check` |
+| L1 | 外围能力 | report、benchmark、normalizer、capacity sweep wrapper | 相关单测或小 E2E |
+| L2 | 核心非 replay | config guard、schema、registry、profile resolver | 相关单测 + 小 E2E |
+| L3 | 核心 replay | scheduler、cache lookup、materialization、latency shape、streaming replay | 新增/相关单测 + 小 E2E；必要时阶段 closure |
+
+如果 L0 / L1 / L2 任务在实现中需要修改 L3 模块，必须停止当前实现，重新说明影响范围并等待用户审批。
+
+## 14. 核心 Replay 改动必须显式自检
+
+以下内容属于核心 replay 保护区：
+
+- trace 到 `SimulationRequest` 的构造。
+- tokenizer / chat template / prefix hash。
+- scheduler planning、waiting queue、running set。
+- chunked prefill selection。
+- block conversion / cached token accounting。
+- HBM / DDR lookup。
+- materialization policy。
+- eviction policy 状态转移。
+- cache event 顺序和语义。
+- latency shape、finish time、TTFT。
+- streaming replay 的 instance isolation。
+
+修改核心 replay 前，方案必须说明是否影响：
+
+```text
+cached_tokens
+hbm_hit_tokens / ddr_hit_tokens / miss_tokens
+finish_time / ttft_ms
+cache event 顺序
+materialization timing
+实例隔离
+capacity sweep 输出
+true streaming 大 trace
+```
+
+实现后必须用测试覆盖改变的行为。不能只用报告输出检查替代核心模块测试。
+
+## 15. 外围能力不得重算核心指标
+
+外围能力包括：
+
+- CLI / scripts wrapper。
+- report / export。
+- capacity sweep 表。
+- benchmark。
+- trace normalizer。
+- dashboard / notebook。
+- future hit floor search。
+
+外围能力只能消费核心仿真器 typed result，不得重新计算或修正：
+
+- cache hit。
+- cached tokens。
+- miss tokens。
+- TTFT。
+- cache event。
+- instance replay ordering。
+
+如果外围能力需要新指标，应先扩展核心 result schema 或新增核心 backend / policy / mode，再由外围能力展示或导出。
+
+## 16. 新语义优先使用新接口
+
+为了保护 V1 replay 语义，新增实验能力时优先使用新接口，而不是修改旧默认行为。
+
+默认策略：
+
+- 新 latency 行为：新增 latency component / backend。
+- 新 cache hit 行为：新增 cache backend 或 block conversion policy。
+- 新 materialization 行为：新增 materialization policy 和 replay/cache mode。
+- 新外部仿真器：新增 adapter boundary。
+- 新 report 字段：先扩展 typed result schema，再扩展 exporter。
+
+Step8 已完成 KV load latency accounting；后续开发不得静默改变 Step7 / Step8 已冻结的 HBM / DDR hit 判定和 KV load typed metrics 语义。
+
+Step9 progressive visibility 必须新增独立 mode，不能直接改变默认 `batch_aware_hbm_ddr_lru` 的 finish-time materialization 语义。
+
+V2 的 gateway、instance queue、cross-instance pooling、Decode / TPOT、Hybrid / sparse attention cache 必须作为独立模块或新 mode 接入。

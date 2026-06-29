@@ -23,10 +23,14 @@ def test_instance_profile_parses_instance_latency_profiles() -> None:
     assert latency_by_instance["instance-a"].hardware_name == "ascend-a3-fast"
     assert latency_by_instance["instance-a"].fitted_ttft.ms_per_uncached_token == 0.01
     assert latency_by_instance["instance-a"].fitted_ttft.calibration_window_requests == 500
+    assert latency_by_instance["instance-a"].kv_load.mode == "token_linear_v1"
+    assert latency_by_instance["instance-a"].kv_load.aggregation == "shared_link_sum"
+    assert latency_by_instance["instance-a"].kv_load.overlap_mode == "none_v1"
     assert latency_by_instance["instance-a"].kv_load.ddr_ms_per_cached_token == 0.001
     assert latency_by_instance["instance-a"].kv_load.remote_ms_per_cached_token == 0.003
     assert latency_by_instance["instance-b"].hardware_name == "ascend-a3-slow"
     assert latency_by_instance["instance-b"].fitted_ttft.ms_per_uncached_token == 0.02
+    assert latency_by_instance["instance-b"].kv_load.mode == "zero"
     assert latency_by_instance["instance-b"].kv_load.ddr_ms_per_cached_token == 0.0
     assert latency_by_instance["instance-b"].kv_load.remote_ms_per_cached_token == 0.0
 
@@ -121,8 +125,89 @@ def test_instance_latency_profile_defaults_kv_load_to_zero() -> None:
     profile = InstanceProfile.from_mapping(data)
 
     kv_load = profile.latency_profile_by_name["instance-a-ttft"].kv_load
+    assert kv_load.mode == "zero"
     assert kv_load.ddr_ms_per_cached_token == 0.0
     assert kv_load.remote_ms_per_cached_token == 0.0
+
+
+def test_instance_latency_profile_accepts_legacy_all_zero_kv_load() -> None:
+    data = _instance_profile_mapping()
+    kv_load = data["instances"]["latency_profiles"]["instance-b-ttft"]["kv_load"]
+    assert isinstance(kv_load, dict)
+    assert "mode" not in kv_load
+
+    profile = InstanceProfile.from_mapping(data)
+
+    assert profile.latency_profile_by_name["instance-b-ttft"].kv_load.mode == "zero"
+
+
+def test_instance_latency_profile_requires_mode_for_nonzero_kv_load() -> None:
+    data = _instance_profile_mapping()
+    kv_load = data["instances"]["latency_profiles"]["instance-a-ttft"]["kv_load"]
+    assert isinstance(kv_load, dict)
+    del kv_load["mode"]
+
+    with pytest.raises(ValueError, match="mode is required"):
+        InstanceProfile.from_mapping(data)
+
+
+def test_instance_latency_profile_rejects_unknown_kv_load_mode() -> None:
+    data = _instance_profile_mapping()
+    kv_load = data["instances"]["latency_profiles"]["instance-a-ttft"]["kv_load"]
+    assert isinstance(kv_load, dict)
+    kv_load["mode"] = "ramulator2_online"
+
+    with pytest.raises(ValueError, match="kv_load.mode"):
+        InstanceProfile.from_mapping(data)
+
+
+def test_instance_latency_profile_rejects_unsupported_kv_load_aggregation() -> None:
+    data = _instance_profile_mapping()
+    kv_load = data["instances"]["latency_profiles"]["instance-a-ttft"]["kv_load"]
+    assert isinstance(kv_load, dict)
+    kv_load["aggregation"] = "per_request_parallel_max"
+
+    with pytest.raises(ValueError, match="kv_load.aggregation"):
+        InstanceProfile.from_mapping(data)
+
+
+def test_instance_latency_profile_rejects_unsupported_kv_load_overlap_mode() -> None:
+    data = _instance_profile_mapping()
+    kv_load = data["instances"]["latency_profiles"]["instance-a-ttft"]["kv_load"]
+    assert isinstance(kv_load, dict)
+    kv_load["overlap_mode"] = "max_compute_or_load_v1"
+
+    with pytest.raises(ValueError, match="kv_load.overlap_mode"):
+        InstanceProfile.from_mapping(data)
+
+
+def test_instance_latency_profile_rejects_zero_mode_with_ddr_coefficients() -> None:
+    data = _instance_profile_mapping()
+    kv_load = data["instances"]["latency_profiles"]["instance-a-ttft"]["kv_load"]
+    assert isinstance(kv_load, dict)
+    kv_load["mode"] = "zero"
+
+    with pytest.raises(ValueError, match="mode=zero"):
+        InstanceProfile.from_mapping(data)
+
+
+def test_instance_latency_profile_rejects_coefficients_from_other_kv_load_modes() -> None:
+    token_data = _instance_profile_mapping()
+    token_kv_load = token_data["instances"]["latency_profiles"]["instance-a-ttft"]["kv_load"]
+    assert isinstance(token_kv_load, dict)
+    token_kv_load["ddr_ms_per_byte"] = 0.1
+
+    with pytest.raises(ValueError, match="ddr_ms_per_byte"):
+        InstanceProfile.from_mapping(token_data)
+
+    byte_data = _instance_profile_mapping()
+    byte_kv_load = byte_data["instances"]["latency_profiles"]["instance-a-ttft"]["kv_load"]
+    assert isinstance(byte_kv_load, dict)
+    byte_kv_load["mode"] = "byte_linear_v1"
+    byte_kv_load["ddr_ms_per_byte"] = 0.1
+
+    with pytest.raises(ValueError, match="ddr_ms_per_cached_token"):
+        InstanceProfile.from_mapping(byte_data)
 
 
 def test_instance_latency_profile_rejects_invalid_kv_load_hyperparameters() -> None:
@@ -152,6 +237,7 @@ def _instance_profile_mapping() -> dict[str, object]:
                         "calibration_window_requests": 500,
                     },
                     "kv_load": {
+                        "mode": "token_linear_v1",
                         "ddr_ms_per_cached_token": 0.001,
                         "remote_ms_per_cached_token": 0.003,
                     },

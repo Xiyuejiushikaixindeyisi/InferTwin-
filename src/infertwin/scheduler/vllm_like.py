@@ -1,4 +1,4 @@
-"""vLLM-like FCFS scheduler for Step4 batch-aware replay."""
+"""vLLM-like FCFS scheduler for batch-aware prefill replay."""
 
 from __future__ import annotations
 
@@ -48,23 +48,32 @@ class VllmLikeBatchScheduler:
         slices: list[ScheduledSlice] = []
 
         for request in list(running):
-            if token_budget <= 0 or len(slices) >= seq_budget:
+            if len(slices) >= seq_budget:
                 break
             if request.status != RequestStatus.RUNNING:
                 continue
+            can_schedule_load_only = _can_schedule_load_only(request)
+            if token_budget <= 0 and not can_schedule_load_only:
+                break
             scheduled_tokens = self._tokens_for_request(request, token_budget)
-            if scheduled_tokens <= 0:
+            if scheduled_tokens <= 0 and not can_schedule_load_only:
                 continue
             slices.append(self._slice_for(request, scheduled_tokens))
-            token_budget -= scheduled_tokens
+            if scheduled_tokens > 0:
+                token_budget -= scheduled_tokens
 
-        while waiting and token_budget > 0 and len(slices) < seq_budget:
+        while waiting and len(slices) < seq_budget:
             request = waiting[0]
             if request.status != RequestStatus.WAITING:
                 raise ValueError(f"waiting request {request.request_id} is not in waiting state")
+            if token_budget <= 0 and not request.cache_lookup_done:
+                break
+            can_schedule_load_only = _can_schedule_load_only(request)
+            if token_budget <= 0 and not can_schedule_load_only:
+                break
 
             scheduled_tokens = self._tokens_for_request(request, token_budget)
-            if scheduled_tokens <= 0:
+            if scheduled_tokens <= 0 and not can_schedule_load_only:
                 break
 
             waiting.popleft()
@@ -74,7 +83,8 @@ class VllmLikeBatchScheduler:
             running.append(request)
 
             slices.append(self._slice_for(request, scheduled_tokens))
-            token_budget -= scheduled_tokens
+            if scheduled_tokens > 0:
+                token_budget -= scheduled_tokens
 
         return ScheduleResult(
             shape=BatchShape(
@@ -96,6 +106,7 @@ class VllmLikeBatchScheduler:
             raise ValueError(
                 f"request {request.request_id} has computed tokens below cached prefix tokens"
             )
+        kv_load_tokens, kv_load_bytes = request.consume_pending_kv_load()
         return ScheduledSlice(
             request_id=request.request_id,
             scheduled_prefill_tokens=scheduled_tokens,
@@ -104,4 +115,10 @@ class VllmLikeBatchScheduler:
             prompt_tokens=request.prompt_tokens,
             cached_prefix_tokens=request.cached_tokens,
             previous_chunk_tokens=previous_chunk_tokens,
+            kv_load_tokens=kv_load_tokens,
+            kv_load_bytes=kv_load_bytes,
         )
+
+
+def _can_schedule_load_only(request: RequestState) -> bool:
+    return request.remaining_prefill_tokens() == 0 and request.has_pending_kv_load()

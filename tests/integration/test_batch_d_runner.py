@@ -57,4 +57,4 @@ def test_batch_d_runner_writes_batch_aware_reports(tmp_path: Path) -> None:
     summary = summary_path.read_text(encoding="utf-8")
     assert "fitted_ttft" in summary
     assert "token_linear_v1" in summary
-    assert "HBM / DDR KV load time is not modeled" in summary
+    assert "DDR KV load latency is modeled when configured by Step8" in summary

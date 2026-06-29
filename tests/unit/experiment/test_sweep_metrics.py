@@ -17,9 +17,30 @@ def test_build_capacity_rows_aggregates_trace_and_instances() -> None:
     rows = build_capacity_rows(
         capacity=8,
         request_metrics=(
-            _request_metric("r1", "instance-b", prompt_tokens=10, hbm_hit_tokens=4, ttft_ms=30.0),
-            _request_metric("r2", "instance-a", prompt_tokens=10, hbm_hit_tokens=10, ttft_ms=10.0),
-            _request_metric("r3", "instance-a", prompt_tokens=10, hbm_hit_tokens=0, ttft_ms=20.0),
+            _request_metric(
+                "r1",
+                "instance-b",
+                prompt_tokens=10,
+                hbm_hit_tokens=4,
+                ttft_ms=30.0,
+                kv_load_ms=3.0,
+            ),
+            _request_metric(
+                "r2",
+                "instance-a",
+                prompt_tokens=10,
+                hbm_hit_tokens=10,
+                ttft_ms=10.0,
+                kv_load_ms=0.0,
+            ),
+            _request_metric(
+                "r3",
+                "instance-a",
+                prompt_tokens=10,
+                hbm_hit_tokens=0,
+                ttft_ms=20.0,
+                kv_load_ms=2.0,
+            ),
         ),
         iteration_metrics=(
             _iteration_metric("instance-a", 0),
@@ -44,6 +65,11 @@ def test_build_capacity_rows_aggregates_trace_and_instances() -> None:
     assert trace_row.ddr_hit_rate == 0.0
     assert trace_row.p50_ttft_ms == 20.0
     assert trace_row.p90_ttft_ms == 30.0
+    assert trace_row.total_kv_load_ms == 5.0
+    assert trace_row.avg_kv_load_ms == pytest.approx(5.0 / 3)
+    assert trace_row.p50_kv_load_ms == 2.0
+    assert trace_row.p90_kv_load_ms == 3.0
+    assert trace_row.p99_kv_load_ms == 3.0
     assert trace_row.cache_event_count == 12
 
     instance_rows = {row.instance_uuid: row for row in rows[1:]}
@@ -51,9 +77,12 @@ def test_build_capacity_rows_aggregates_trace_and_instances() -> None:
     assert instance_rows["instance-a"].scope == INSTANCE_SCOPE
     assert instance_rows["instance-a"].request_count == 2
     assert instance_rows["instance-a"].iteration_count == 2
+    assert instance_rows["instance-a"].total_kv_load_ms == 2.0
+    assert instance_rows["instance-a"].p90_kv_load_ms == 2.0
     assert instance_rows["instance-a"].cache_event_count == 0
     assert instance_rows["instance-b"].request_count == 1
     assert instance_rows["instance-b"].iteration_count == 1
+    assert instance_rows["instance-b"].total_kv_load_ms == 3.0
     assert instance_rows["instance-b"].cache_event_count == 0
 
 
@@ -148,6 +177,7 @@ def _request_metric(
     prompt_tokens: int,
     hbm_hit_tokens: int,
     ttft_ms: float,
+    kv_load_ms: float = 0.0,
 ) -> BatchAwareRequestMetrics:
     return BatchAwareRequestMetrics(
         request_id=request_id,
@@ -167,6 +197,7 @@ def _request_metric(
         miss_tokens=prompt_tokens - hbm_hit_tokens,
         effective_hit_rate=hbm_hit_tokens / prompt_tokens,
         scheduled_iteration_count=1,
+        kv_load_ms=kv_load_ms,
     )
 
 

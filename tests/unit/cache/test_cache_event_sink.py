@@ -3,7 +3,15 @@ from infertwin.cache.event_sink import (
     NullCacheEventSink,
     StatsOnlyCacheEventSink,
 )
-from infertwin.cache.events import EVICT, LOOKUP_HIT, LOOKUP_MISS, MATERIALIZE, CacheEvent
+from infertwin.cache.events import (
+    CACHE_TIER_DDR,
+    EVICT,
+    LOOKUP_HIT,
+    LOOKUP_MISS,
+    MATERIALIZE,
+    STORE,
+    CacheEvent,
+)
 
 
 def test_in_memory_cache_event_sink_collects_events_and_stats() -> None:
@@ -23,8 +31,11 @@ def test_in_memory_cache_event_sink_collects_events_and_stats() -> None:
     assert sink.stats.materialize_events == 1
     assert sink.stats.lookup_hit_events == 1
     assert sink.stats.evict_events == 1
+    assert sink.stats.store_events == 0
     assert sink.stats.peak_hbm_used_blocks == 1
     assert sink.stats.final_hbm_used_blocks == 0
+    assert sink.stats.peak_ddr_used_blocks == 0
+    assert sink.stats.final_ddr_used_blocks == 0
 
 
 def test_in_memory_cache_event_sink_fails_when_event_cap_is_reached() -> None:
@@ -58,29 +69,36 @@ def test_stats_only_cache_event_sink_tracks_stats_without_payloads() -> None:
         _event(LOOKUP_MISS, hbm_used_blocks=0),
         _event(MATERIALIZE, hbm_used_blocks=2),
         _event(EVICT, hbm_used_blocks=1),
+        _ddr_store_event(ddr_used_blocks=7),
     )
 
     sink.emit_many(events)
 
     assert sink.snapshot_events() == ()
-    assert sink.stats.total_events == 3
+    assert sink.stats.total_events == 4
     assert sink.stats.lookup_miss_events == 1
     assert sink.stats.materialize_events == 1
     assert sink.stats.evict_events == 1
+    assert sink.stats.store_events == 1
     assert sink.stats.peak_hbm_used_blocks == 2
     assert sink.stats.final_hbm_used_blocks == 1
+    assert sink.stats.peak_ddr_used_blocks == 7
+    assert sink.stats.final_ddr_used_blocks == 7
 
 
 def test_cache_event_stats_snapshot_is_not_mutated_by_later_events() -> None:
     sink = InMemoryCacheEventSink()
-    sink.emit_many((_event(LOOKUP_MISS, hbm_used_blocks=0),))
+    sink.emit_many((_ddr_store_event(ddr_used_blocks=3),))
     snapshot = sink.snapshot_stats()
 
     sink.emit_many((_event(MATERIALIZE, hbm_used_blocks=1),))
 
     assert snapshot.total_events == 1
-    assert snapshot.lookup_miss_events == 1
+    assert snapshot.lookup_miss_events == 0
     assert snapshot.materialize_events == 0
+    assert snapshot.store_events == 1
+    assert snapshot.peak_ddr_used_blocks == 3
+    assert snapshot.final_ddr_used_blocks == 3
     assert sink.stats.total_events == 2
 
 
@@ -98,4 +116,25 @@ def _event(event_type: str, *, hbm_used_blocks: int) -> CacheEvent:
         eviction_policy="lru",
         hbm_used_blocks=hbm_used_blocks,
         hbm_capacity_blocks=4,
+    )
+
+
+def _ddr_store_event(*, ddr_used_blocks: int) -> CacheEvent:
+    return CacheEvent(
+        event_type=STORE,
+        timestamp_ms=1.0,
+        instance_uuid="instance-a",
+        request_id="request-a",
+        block_key="block-store",
+        block_index=0,
+        token_count=16,
+        cache_tier=CACHE_TIER_DDR,
+        reason="test_store",
+        eviction_policy="lru",
+        hbm_used_blocks=1,
+        hbm_capacity_blocks=4,
+        ddr_used_blocks=ddr_used_blocks,
+        ddr_capacity_blocks=64,
+        target_tier=CACHE_TIER_DDR,
+        store_tokens=16,
     )

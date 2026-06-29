@@ -82,7 +82,7 @@ InferTwin 当前产品分为两层：
 
 ## 3. 当前核心仿真器能力
 
-Step1-Step6 与工程优化阶段已完成核心离线 replay 骨架。
+Step1-Step8 与工程优化阶段已完成核心离线 replay 骨架、单实例 DDR/CPU pooling hit accounting 和 KV load latency accounting。
 
 当前已实现：
 
@@ -99,16 +99,20 @@ Step1-Step6 与工程优化阶段已完成核心离线 replay 骨架。
 - finish-time materialization。
 - infinite HBM prefix cache。
 - finite HBM LRU cache。
+- single-instance DDR/CPU LRU prefix cache tier。
+- tiered prefix cache backend：HBM contiguous hit -> DDR contiguous hit -> miss。
+- `batch_aware_hbm_ddr_lru` streaming cache mode。
 - stateful eviction policy。
 - streaming cache event writer。
 - stats-only cache event sink。
 - fitted TTFT latency backend。
 - `InstanceProfile / InstanceLatencyProfile` schema。
-- true streaming replay 中按 `instance_uuid` 选择 fitted TTFT backend。
+- true streaming replay 中按 `instance_uuid` 选择 request build context、scheduler setup 和 fitted TTFT backend。
 - `ModelRegistry` 作为 model 到 profile / tokenizer / default latency 的索引。
 - instance 到 model / deployment / optional latency profile 的绑定校验。
+- model-owned runtime defaults，包括 default cache metadata、block size、eviction policy 和 deployment-derived scheduler 参数。
 - calibration failure fallback policy schema，当前仅为未来 external calibration harness 预留。
-- 实例级 `kv_load` latency 超参数 schema，当前默认 0。
+- 实例级 / 模型默认 `kv_load` latency profile，可通过 zero、token-linear、byte-linear mode 控制 DDR/CPU hit 的 KV load latency。
 - HBM capacity sweep runner。
 - `RunSpec` / profile schema / `ConfigGuard` foundation。
 - profile-aware request build path。
@@ -117,10 +121,13 @@ Step1-Step6 与工程优化阶段已完成核心离线 replay 骨架。
 - vLLM-like cached_tokens accounting across batch-aware and infinite replay。
 - `MaterializationPolicy` interface with default `FinishTimeMaterializationPolicy`。
 - `ServingLatencyProfile` replay-facing latency composition interface。
+- `KVLoadLatencyProfile` replay-facing KV load latency component。
 - true streaming request shard build。
 - per-instance streaming replay。
 - streaming capacity sweep runner。
 - streaming benchmark harness。
+- tier-aware capacity sweep metrics，包括 HBM / DDR / miss tokens。
+- tier-aware `cache_events.csv`，可观察 DDR `store` / `lookup_hit`。
 
 当前标准核心结果包括：
 
@@ -150,8 +157,10 @@ CSV trace
 - physical KV slot allocation。
 - pinned / refcount。
 - progressive block visibility / progressive block materialization。
-- DDR / SSD / multi-tier cache。
-- KV load latency。
+- compute/load overlap。
+- KV load queue、shared bandwidth backpressure、priority 和 load completion event。
+- DDR hit promotion。
+- SSD / remote cache tier。
 - Decode / TPOT 建模。
 - decode KV growth。
 - gateway routing。
@@ -161,10 +170,31 @@ CSV trace
 
 其中：
 
-- progressive block visibility 是必须补齐的核心能力，但用户评审确认可放到 Step7 之后作为独立 replay/cache mode 处理。
-- Decode / TPOT 建模当前保持 pending。只有在出现明确 Decode 建模需求，且目标模型部署形态是 PD 混部时，才开启 decode-aware scheduler / replay mode 设计。
+- single-instance DDR/CPU pooling hit accounting 已在 Step7 完成。
+- DDR/CPU 命中的 KV load latency accounting 已在 Step8 完成；Step8 v1 默认不建模 overlap、promotion、load queue/backpressure 或 load completion event。
+- progressive block visibility 是 V1 必须补齐的核心能力，放到 Step9 作为独立 replay/cache mode 处理。
+- Decode / TPOT 建模进入 V2 pending。只有在出现明确 Decode 建模需求，且目标模型部署形态是 PD 混部时，才开启 decode-aware scheduler / replay mode 设计。
 
 这些内容不是被否定，而是待设计、待实现的核心仿真器能力。
+
+### 4.1 V1 / V2 边界
+
+V1 核心仿真器准出范围：
+
+1. Step7：单实例池化，已完成。单个实例可以在 DDR/CPU 侧额外 KV cache 存储中命中，并输出 DDR hit accounting。
+2. Step8：KV load latency，已完成。为 DDR/CPU 等非 HBM 命中增加加载时延建模。
+3. Step9：progressive chunk visibility，下一阶段。chunk 生成后即可成为后续请求的 KV cache hit 候选，不再等待整个 prompt prefill 完成；TTFT prefill 时间由多个 uncached-token chunk 组合。
+
+V2 之后再处理：
+
+- 复杂 Hybrid 模型，例如 Qwen3.6、DeepSeekV4 等打破 full-attention block 假设的模型。
+- gateway simulation。
+- 实例侧排队。
+- 多实例池化 / 跨实例 KV 命中。
+- Decode / TPOT 建模。
+- V1 准出后的新一轮工程优化。
+
+V1 准出前，不新增新的外围能力。外围能力只能在核心 replay/cache/latency 语义稳定后消费 typed result。
 
 ## 5. 输入形态
 
@@ -508,7 +538,7 @@ latency_fallback:
 - trace 中出现实例表未声明的 `instance_uuid` 时 fail-fast。
 - 启用 model registry 后，instance 必须声明 `model_name`，且该 model 必须存在于 registry。
 - 多个实例可以共享同一个 deployment，但拥有不同 TTFT 超参数。
-- `kv_load` 字段当前只解析、校验、保存，默认 0；未来 DDR / remote hit tokens 接入后再参与 TTFT。
+- `kv_load` 字段已参与 Step8 replay-facing latency composition；默认 `mode=zero` 时不增加时延，`token_linear` / `byte_linear` 可让 DDR/CPU hit tokens 或 bytes 参与 KV load latency。
 - `latency_fallback` 只用于未来 external calibration failure；request build、tokenizer、scheduler、cache、replay 错误不能 fallback。
 - 动态每 500 条请求重新拟合 TTFT 尚未实现；当前只保留 schema 和策略字段。
 
@@ -523,7 +553,9 @@ instances:
     deployment_profile: configs/deployments/glm-v5.1_ascend_tp8.yaml
 ```
 
-当前 fixed-routing replay 可以在没有 `InstanceProfile` 时，把 trace 中所有 `instance_uuid` 视为使用同一个全局 latency/backend 配置。第一版 heterogeneous latency cluster replay 已经支持实例级 fitted TTFT backend 和 model default latency fallback；未来完整 heterogeneous instance cluster simulation 还需要 per-instance scheduler/cache/deployment 能力。
+当前 fixed-routing replay 可以在没有 `InstanceProfile` 时，把 trace 中所有 `instance_uuid` 视为使用同一个全局 latency/backend 配置。启用 model registry 和 instance runtime 后，streaming path 已支持实例绑定模型，并按模型默认运行参数选择 tokenizer、scheduler chunk、block size、default cache metadata 和 TTFT fallback。
+
+这仍不是完整 heterogeneous instance cluster simulation：当前 capacity sweep 会用 sweep candidate 覆盖模型默认 HBM capacity；Step7 已补齐单实例 DDR/CPU pooling hit accounting，Step8 已补齐 DDR/CPU hit 的 KV load latency accounting，但 SSD / remote tier、Hybrid cache group、gateway 和实例侧排队仍需后续核心能力补齐。
 
 ### 5.5 模型名解析与冲突处理
 
@@ -714,7 +746,7 @@ InferTwin 当前统计有效连续 prefix hit。
 - `effective_hit_rate`
 - `kv_hit_rate`
 
-Step6 v1 中 DDR 字段保留但恒为 0。
+HBM-only mode 中 DDR 字段为 0；`batch_aware_hbm_ddr_lru` mode 中 DDR 字段记录同实例 DDR/CPU tier 的 effective hit tokens。
 
 ### 7.2 Block Size 术语
 
@@ -769,19 +801,19 @@ request TTFT =
 ```text
 queue_waiting_ms = 0
 uncached_prefill_compute_ms = fitted_ttft(uncached_tokens)
-kv_load_ms = 0
+kv_load_ms = KVLoadLatencyProfile(ddr_hit_tokens, ddr_hit_bytes)
 ```
 
 `queue_waiting_ms` 不是实例静态超参数，后续应由 queue simulation 给出，不放入实例 latency profile。
 
-`kv_load_ms` 当前为 0 是因为只实现 HBM 命中。实例 latency profile 已保留：
+`kv_load_ms` 默认 `mode=zero` 时为 0；Step8 已支持 `token_linear` / `byte_linear`，可让 DDR/CPU hit 进入 TTFT。实例 latency profile 可配置：
 
 ```text
 ddr_ms_per_cached_token
 remote_ms_per_cached_token
 ```
 
-未来 DDR / remote 命中接入后，建议使用稳定口径：
+当前只实现 DDR/CPU tier 的本实例 hit latency。remote 命中尚未实现；未来 remote tier 接入后，建议使用稳定口径：
 
 ```text
 kv_load_ms =
@@ -868,7 +900,7 @@ docs/notes/cached_tokens_calculation_logic.md
 
 ### 8.2 多级 Cache Backend
 
-目标：
+长期目标：
 
 ```text
 HBM -> DDR -> SSD / remote store
@@ -886,7 +918,8 @@ HBM -> DDR -> SSD / remote store
 状态：
 
 ```text
-待设计，待实现。
+Step7 已完成 single-instance HBM -> DDR/CPU hit accounting。
+SSD / remote store、promotion / demotion、cross-instance pooling 仍待设计、待实现。
 ```
 
 ### 8.3 KV Load Latency
@@ -1251,10 +1284,12 @@ InferTwin 当前最核心的价值是：
 
 InferTwin 表、capacity sweep、hit floor search、dashboard 都是该骨架之上的外围能力。
 
-后续工程优化和 Step7 之后的开发必须先声明：
+后续工程优化和 V1 开发必须先声明：
 
 ```text
 本阶段是在开发核心仿真器，还是开发外围能力。
 ```
 
 这条声明是产品设计和工程治理的一部分。
+
+V1 准出前，不新增新的外围能力；V1 准出后，外围能力也只能消费稳定的核心 typed result，不能反向修改核心 replay 语义。

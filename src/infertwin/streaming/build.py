@@ -9,12 +9,18 @@ from types import TracebackType
 from typing import Any
 from collections.abc import Mapping
 
+from infertwin.config.guard import guard_core_profiles
+from infertwin.config.instance_runtime import InstanceRuntimeResolver
+from infertwin.config.model_runtime import ResolvedModelRuntimeProfile
+from infertwin.config.run_spec import RunSpec
 from infertwin.experiment.request_builder import (
     RejectedTraceRecord,
+    RequestBuildSettings,
     build_prompt_too_long_rejection,
     build_request_build_settings_from_config,
 )
 from infertwin.instance.request import build_simulation_request
+from infertwin.request.build_context import RequestBuildContext
 from infertwin.request.tokenizer_registry import PromptTooLongError
 from infertwin.streaming.manifest import (
     STREAMING_MANIFEST_SCHEMA_VERSION,
@@ -58,14 +64,21 @@ class StreamingRequestShardBuilder:
         shard_root: str | Path,
         rejected_path: str | Path | None = None,
         require_sorted_trace: bool = True,
+        runtime_resolver: InstanceRuntimeResolver | None = None,
     ) -> None:
         self.config = config
         self.shard_root = Path(shard_root)
         self.rejected_path = Path(rejected_path) if rejected_path is not None else None
         self.require_sorted_trace = require_sorted_trace
+        self.runtime_resolver = runtime_resolver
 
     def build(self) -> StreamingBuildResult:
         settings = build_request_build_settings_from_config(self.config)
+        request_build_resolver = StreamingRequestBuildResolver(
+            settings=settings,
+            runtime_resolver=self.runtime_resolver,
+            output_dir=self.shard_root,
+        )
         accepted_count = 0
         rejected_count = 0
         previous_key: tuple[float, str, str] | None = None
@@ -85,12 +98,14 @@ class StreamingRequestShardBuilder:
                 previous_key = current_key
 
                 try:
+                    build_inputs = request_build_resolver.inputs_for(record)
                     request = build_simulation_request(
                         record,
                         tokenizer_registry=settings.tokenizer_registry,
-                        block_size_tokens=settings.block_size_tokens,
+                        block_size_tokens=build_inputs.block_size_tokens,
                         cache_scope=settings.cache_scope,
-                        build_context=settings.build_context,
+                        build_context=build_inputs.build_context,
+                        tokenizer_profile=build_inputs.tokenizer_profile,
                     )
                 except PromptTooLongError as exc:
                     rejected_writer.write(build_prompt_too_long_rejection(record, exc))
@@ -114,6 +129,73 @@ class StreamingRequestShardBuilder:
             manifest=manifest,
             rejected_path=self.rejected_path if rejected_count > 0 else None,
         )
+
+
+@dataclass(frozen=True, slots=True)
+class StreamingRequestBuildInputs:
+    """Resolved request-build inputs for one trace record."""
+
+    block_size_tokens: int
+    build_context: RequestBuildContext
+    tokenizer_profile: str | None
+
+
+class StreamingRequestBuildResolver:
+    """Resolve request-build context from optional instance runtime profiles."""
+
+    def __init__(
+        self,
+        *,
+        settings: RequestBuildSettings,
+        runtime_resolver: InstanceRuntimeResolver | None,
+        output_dir: Path,
+    ) -> None:
+        self._settings = settings
+        self._runtime_resolver = runtime_resolver
+        self._output_dir = output_dir
+        self._context_by_model: dict[str, RequestBuildContext] = {}
+
+    def inputs_for(self, record: TraceRecord) -> StreamingRequestBuildInputs:
+        if self._runtime_resolver is None:
+            return StreamingRequestBuildInputs(
+                block_size_tokens=self._settings.block_size_tokens,
+                build_context=self._settings.build_context,
+                tokenizer_profile=None,
+            )
+        runtime_profile = self._runtime_resolver.runtime_profile_for(record.instance_uuid)
+        return StreamingRequestBuildInputs(
+            block_size_tokens=runtime_profile.default_cache.block_size_tokens,
+            build_context=self._context_for(runtime_profile),
+            tokenizer_profile=runtime_profile.tokenizer_profile,
+        )
+
+    def _context_for(self, runtime_profile: ResolvedModelRuntimeProfile) -> RequestBuildContext:
+        cached = self._context_by_model.get(runtime_profile.model_name)
+        if cached is not None:
+            return cached
+        run_spec = RunSpec(
+            trace_path=self._settings.trace_path,
+            output_dir=self._output_dir,
+            mode="capacity_sweep_streaming",
+            model_name=runtime_profile.model_name,
+            requested_block_size=runtime_profile.default_cache.block_size_tokens,
+            model_profile=runtime_profile.model_profile_path,
+            deployment_profile=runtime_profile.deployment_profile_path,
+        )
+        guard_core_profiles(
+            run_spec=run_spec,
+            model_profile=runtime_profile.model_profile,
+            deployment_profile=runtime_profile.deployment_profile,
+            block_conversion_enabled=True,
+        ).raise_if_blocked()
+        context = RequestBuildContext.from_profiles(
+            run_spec=run_spec,
+            model_profile=runtime_profile.model_profile,
+            deployment_profile=runtime_profile.deployment_profile,
+            max_prompt_tokens=self._settings.build_context.max_prompt_tokens,
+        )
+        self._context_by_model[runtime_profile.model_name] = context
+        return context
 
 
 class CsvRejectedTraceRecordWriter:

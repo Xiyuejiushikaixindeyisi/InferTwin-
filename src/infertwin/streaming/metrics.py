@@ -138,7 +138,9 @@ class _ScopeAccumulator:
     hbm_hit_tokens: int = 0
     ddr_hit_tokens: int = 0
     miss_tokens: int = 0
+    total_kv_load_ms: float = 0.0
     ttft_values: list[float] | None = None
+    kv_load_values: list[float] | None = None
 
     def on_request(self, metric: BatchAwareRequestMetrics) -> None:
         self.request_count += 1
@@ -146,7 +148,9 @@ class _ScopeAccumulator:
         self.hbm_hit_tokens += metric.hbm_hit_tokens
         self.ddr_hit_tokens += metric.ddr_hit_tokens
         self.miss_tokens += metric.miss_tokens
+        self.total_kv_load_ms += metric.kv_load_ms
         self._ttft_values.append(metric.ttft_ms)
+        self._kv_load_values.append(metric.kv_load_ms)
 
     def on_iteration(self, _metric: IterationMetrics) -> None:
         self.iteration_count += 1
@@ -180,6 +184,11 @@ class _ScopeAccumulator:
             p90_ttft_ms=percentile(self._ttft_values, 90),
             p99_ttft_ms=percentile(self._ttft_values, 99),
             cache_event_count=cache_event_count,
+            total_kv_load_ms=self.total_kv_load_ms,
+            avg_kv_load_ms=_safe_rate(self.total_kv_load_ms, self.request_count),
+            p50_kv_load_ms=percentile(self._kv_load_values, 50),
+            p90_kv_load_ms=percentile(self._kv_load_values, 90),
+            p99_kv_load_ms=percentile(self._kv_load_values, 99),
         )
 
     @property
@@ -187,6 +196,12 @@ class _ScopeAccumulator:
         if self.ttft_values is None:
             self.ttft_values = []
         return self.ttft_values
+
+    @property
+    def _kv_load_values(self) -> list[float]:
+        if self.kv_load_values is None:
+            self.kv_load_values = []
+        return self.kv_load_values
 
 
 def _validate_request_metric(metric: BatchAwareRequestMetrics) -> None:
@@ -199,7 +214,7 @@ def _validate_request_metric(metric: BatchAwareRequestMetrics) -> None:
         )
 
 
-def _safe_rate(numerator: int, denominator: int) -> float:
+def _safe_rate(numerator: float, denominator: int) -> float:
     if denominator <= 0:
         return 0.0
     return numerator / denominator

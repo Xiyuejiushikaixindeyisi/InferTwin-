@@ -72,6 +72,113 @@ def test_scheduled_slice_separates_cached_prefix_from_previous_chunks() -> None:
     assert scheduled_slice.previous_chunk_tokens == 2
 
 
+def test_first_scheduled_slice_carries_pending_kv_load() -> None:
+    scheduler = VllmLikeBatchScheduler(SchedulerConfig(max_num_batched_tokens=8, max_num_seqs=4))
+    request = _request(
+        "r1",
+        prompt_tokens=8,
+        arrival_seq=0,
+        cached_tokens=4,
+        kv_load_tokens=4,
+        kv_load_bytes=1024,
+    )
+    waiting = WaitingQueue([request])
+
+    result = scheduler.schedule(
+        instance_uuid="instance-a",
+        iteration_id=0,
+        start_time_ms=0.0,
+        waiting=waiting,
+        running=[],
+    )
+
+    scheduled_slice = result.shape.request_slices[0]
+    assert scheduled_slice.kv_load_tokens == 4
+    assert scheduled_slice.kv_load_bytes == 1024
+    assert request.has_pending_kv_load() is False
+
+
+def test_later_scheduled_slice_does_not_repeat_kv_load() -> None:
+    scheduler = VllmLikeBatchScheduler(SchedulerConfig(max_num_batched_tokens=4, max_num_seqs=4))
+    request = _request(
+        "r1",
+        prompt_tokens=12,
+        arrival_seq=0,
+        cached_tokens=4,
+        kv_load_tokens=4,
+        kv_load_bytes=1024,
+    )
+    waiting = WaitingQueue([request])
+    running: list[RequestState] = []
+
+    first = scheduler.schedule(
+        instance_uuid="instance-a",
+        iteration_id=0,
+        start_time_ms=0.0,
+        waiting=waiting,
+        running=running,
+    )
+    request.apply_scheduled_tokens(
+        scheduled_tokens=first.shape.request_slices[0].scheduled_prefill_tokens,
+        finish_time_ms=1.0,
+    )
+    second = scheduler.schedule(
+        instance_uuid="instance-a",
+        iteration_id=1,
+        start_time_ms=1.0,
+        waiting=waiting,
+        running=running,
+    )
+
+    assert first.shape.request_slices[0].kv_load_tokens == 4
+    assert second.shape.request_slices[0].kv_load_tokens == 0
+
+
+def test_scheduler_emits_load_only_slice_for_zero_miss_ddr_hit() -> None:
+    scheduler = VllmLikeBatchScheduler(SchedulerConfig(max_num_batched_tokens=8, max_num_seqs=4))
+    request = _request(
+        "r1",
+        prompt_tokens=4,
+        arrival_seq=0,
+        cached_tokens=4,
+        kv_load_tokens=4,
+        kv_load_bytes=1024,
+    )
+    waiting = WaitingQueue([request])
+    running: list[RequestState] = []
+
+    result = scheduler.schedule(
+        instance_uuid="instance-a",
+        iteration_id=0,
+        start_time_ms=0.0,
+        waiting=waiting,
+        running=running,
+    )
+
+    scheduled_slice = result.shape.request_slices[0]
+    assert scheduled_slice.scheduled_prefill_tokens == 0
+    assert scheduled_slice.kv_load_tokens == 4
+    assert list(waiting) == []
+    assert running == [request]
+
+
+def test_scheduler_does_not_emit_load_only_slice_for_hbm_only_zero_miss() -> None:
+    scheduler = VllmLikeBatchScheduler(SchedulerConfig(max_num_batched_tokens=8, max_num_seqs=4))
+    request = _request("r1", prompt_tokens=4, arrival_seq=0, cached_tokens=4)
+    waiting = WaitingQueue([request])
+
+    result = scheduler.schedule(
+        instance_uuid="instance-a",
+        iteration_id=0,
+        start_time_ms=0.0,
+        waiting=waiting,
+        running=[],
+    )
+
+    assert result.is_empty
+    assert list(waiting) == [request]
+
+
 def test_scheduler_respects_max_num_batched_tokens() -> None:
     scheduler = VllmLikeBatchScheduler(SchedulerConfig(max_num_batched_tokens=10, max_num_seqs=4))
     waiting = WaitingQueue([_request("r1", 8, 0), _request("r2", 8, 1)])
@@ -112,6 +219,8 @@ def _request(
     prompt_tokens: int,
     arrival_seq: int,
     cached_tokens: int = 0,
+    kv_load_tokens: int = 0,
+    kv_load_bytes: int = 0,
 ) -> RequestState:
     request = RequestState(
         request_id=request_id,
@@ -124,5 +233,7 @@ def _request(
     request.set_cache_lookup(
         cached_tokens=cached_tokens,
         miss_tokens=prompt_tokens - cached_tokens,
+        kv_load_tokens=kv_load_tokens,
+        kv_load_bytes=kv_load_bytes,
     )
     return request

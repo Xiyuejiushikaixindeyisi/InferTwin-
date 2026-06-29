@@ -10,7 +10,7 @@ from typing import Literal
 class SchedulerConfig:
     """Controls the vLLM-like scheduler approximation.
 
-    The first Step4 scheduler only supports FCFS prefill scheduling. It models
+    The current scheduler only supports FCFS prefill scheduling. It models
     token and sequence budgets, but not finite KV slot allocation or preemption.
     """
 
@@ -26,7 +26,7 @@ class SchedulerConfig:
         if self.max_num_seqs <= 0:
             raise ValueError("max_num_seqs must be positive")
         if self.policy != "fcfs":
-            raise ValueError("Step4 only supports scheduler policy 'fcfs'")
+            raise ValueError("InferTwin currently only supports scheduler policy 'fcfs'")
         if self.long_prefill_token_threshold is not None:
             if self.long_prefill_token_threshold <= 0:
                 raise ValueError("long_prefill_token_threshold must be positive")

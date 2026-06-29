@@ -26,12 +26,14 @@ def test_write_capacity_sweep_report_writes_csv_and_summary(tmp_path: Path) -> N
     assert paths.summary_path.is_file()
     csv_text = paths.capacity_sweep_path.read_text(encoding="utf-8")
     assert "hbm_capacity_blocks,scope,instance_uuid" in csv_text
+    assert "p90_kv_load_ms" in csv_text
     assert "8,trace," in csv_text
     assert "8,instance,instance-a" in csv_text
 
     summary = paths.summary_path.read_text(encoding="utf-8")
     assert "InferTwin Capacity Sweep Summary" in summary
     assert "fitted_ttft" in summary
+    assert "p90_kv_load_ms" in summary
     assert "DDR / SSD cache hits are not modeled" in summary
     assert "P90 target matching / hit floor search is not performed" in summary
     assert "Instance rows set `cache_event_count` to 0" in summary

@@ -5,9 +5,11 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from infertwin.config.profiles import KVLoadLatencyProfile
 from infertwin.latency.backend import BatchLatencyBackend
 from infertwin.latency.fitted_ttft import FittedTTFTLatencyBackend
 from infertwin.latency.formula import FormulaLatencyBackend
+from infertwin.latency.kv_load import build_kv_load_component
 from infertwin.latency.profile import ServingLatencyProfile
 
 
@@ -52,6 +54,12 @@ def build_batch_latency_backend(config: Mapping[str, Any]) -> BatchLatencyBacken
                 fitted_config,
                 model_name=model_name,
                 hardware_name=hardware_name,
+            ),
+            kv_load_component=build_kv_load_component(
+                KVLoadLatencyProfile.from_mapping(
+                    profile_config.get("kv_load"),
+                    field_name="latency.serving_latency_profile.kv_load",
+                )
             ),
         )
 

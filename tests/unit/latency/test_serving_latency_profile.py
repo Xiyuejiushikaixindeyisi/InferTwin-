@@ -1,6 +1,7 @@
 import pytest
 
 from infertwin.latency.fitted_ttft import FittedTTFTLatencyBackend
+from infertwin.latency.kv_load import TokenLinearKVLoadLatencyComponent
 from infertwin.latency.profile import (
     ServingLatencyProfile,
     StaticLatencyComponent,
@@ -64,6 +65,57 @@ def test_serving_latency_profile_defaults_queue_and_kv_load_to_zero() -> None:
     assert result.details["kv_load_modeled"] is False
 
 
+def test_serving_latency_profile_composes_real_kv_load_component() -> None:
+    profile = ServingLatencyProfile(
+        profile="glm-v5_ascend910c_serving_v1",
+        ttft_backend=FittedTTFTLatencyBackend(
+            intercept_ms=1.0,
+            ms_per_uncached_token=0.5,
+            model_name="glm-v5",
+            hardware_name="ascend910c",
+            profile="glm-v5_ascend910c_ttft",
+        ),
+        kv_load_component=TokenLinearKVLoadLatencyComponent(
+            ddr_fixed_overhead_ms=2.0,
+            ddr_ms_per_cached_token=0.25,
+            calibrated_from="unit-test-kv-load",
+        ),
+    )
+
+    result = profile.estimate_iteration(_shape([8], kv_load_tokens=16, kv_load_bytes=4096))
+
+    assert result.duration_ms == 11.0
+    assert result.details["ttft_ms"] == 5.0
+    assert result.details["kv_load_ms"] == 6.0
+    assert result.details["kv_load_modeled"] is True
+    assert result.details["kv_load_mode"] == "token_linear_v1"
+    assert result.details["kv_load_calibrated_from"] == "unit-test-kv-load"
+
+
+def test_serving_latency_profile_load_only_shape_does_not_charge_ttft_intercept() -> None:
+    profile = ServingLatencyProfile(
+        profile="glm-v5_ascend910c_serving_v1",
+        ttft_backend=FittedTTFTLatencyBackend(
+            intercept_ms=99.0,
+            ms_per_uncached_token=0.5,
+            model_name="glm-v5",
+            hardware_name="ascend910c",
+            profile="glm-v5_ascend910c_ttft",
+        ),
+        kv_load_component=TokenLinearKVLoadLatencyComponent(
+            ddr_fixed_overhead_ms=2.0,
+            ddr_ms_per_cached_token=0.25,
+        ),
+    )
+
+    result = profile.estimate_iteration(_load_only_shape(kv_load_tokens=16, kv_load_bytes=4096))
+
+    assert result.duration_ms == 6.0
+    assert result.details["ttft_ms"] == 0.0
+    assert result.details["ttft_reason"] == "load_only_kv_load"
+    assert result.details["kv_load_ms"] == 6.0
+
+
 def test_serving_latency_profile_rejects_unsupported_decode_mode() -> None:
     with pytest.raises(ValueError, match="not-modeled decode mode"):
         ServingLatencyProfile(
@@ -89,7 +141,12 @@ def test_zero_latency_component_exposes_not_modeled_reason() -> None:
     assert result.details["reason"] == "queue_not_modeled"
 
 
-def _shape(tokens: list[int]) -> BatchShape:
+def _shape(
+    tokens: list[int],
+    *,
+    kv_load_tokens: int = 0,
+    kv_load_bytes: int = 0,
+) -> BatchShape:
     slices = []
     for index, scheduled_tokens in enumerate(tokens):
         slices.append(
@@ -101,6 +158,8 @@ def _shape(tokens: list[int]) -> BatchShape:
                 prompt_tokens=scheduled_tokens,
                 cached_prefix_tokens=0,
                 previous_chunk_tokens=0,
+                kv_load_tokens=kv_load_tokens if index == 0 else 0,
+                kv_load_bytes=kv_load_bytes if index == 0 else 0,
             )
         )
 
@@ -109,4 +168,29 @@ def _shape(tokens: list[int]) -> BatchShape:
         iteration_id=0,
         start_time_ms=0.0,
         request_slices=tuple(slices),
+    )
+
+
+def _load_only_shape(
+    *,
+    kv_load_tokens: int,
+    kv_load_bytes: int,
+) -> BatchShape:
+    return BatchShape(
+        instance_uuid="instance-a",
+        iteration_id=0,
+        start_time_ms=0.0,
+        request_slices=(
+            ScheduledSlice(
+                request_id="r0",
+                scheduled_prefill_tokens=0,
+                computed_tokens_before=16,
+                computed_tokens_after=16,
+                prompt_tokens=16,
+                cached_prefix_tokens=16,
+                previous_chunk_tokens=0,
+                kv_load_tokens=kv_load_tokens,
+                kv_load_bytes=kv_load_bytes,
+            ),
+        ),
     )

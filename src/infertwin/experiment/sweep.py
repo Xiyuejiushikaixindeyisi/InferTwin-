@@ -59,6 +59,11 @@ class CapacitySweepRow:
     p90_ttft_ms: float
     p99_ttft_ms: float
     cache_event_count: int
+    total_kv_load_ms: float = 0.0
+    avg_kv_load_ms: float = 0.0
+    p50_kv_load_ms: float = 0.0
+    p90_kv_load_ms: float = 0.0
+    p99_kv_load_ms: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -173,7 +178,7 @@ def build_capacity_sweep_config(
     *,
     allowed_modes: tuple[str, ...] = ("capacity_sweep",),
 ) -> CapacitySweepConfig:
-    """Validate and normalize the Step6 sweep config section."""
+    """Validate and normalize the HBM capacity sweep config section."""
 
     mode = _mapping(config, "simulation").get("mode")
     if mode not in allowed_modes:
@@ -181,7 +186,7 @@ def build_capacity_sweep_config(
         raise ValueError(f"capacity sweep requires simulation.mode in: {allowed}")
     if "targets" in config:
         raise ValueError(
-            "Step6 capacity_sweep does not support targets; use hbm_capacity_blocks sweep "
+            "capacity_sweep does not support targets; use hbm_capacity_blocks sweep "
             "and inspect capacity_sweep.csv."
         )
 
@@ -199,7 +204,7 @@ def build_capacity_sweep_config(
         default=False,
     )
     if parallel_instances:
-        raise ValueError("parallel_instances is reserved but not implemented in Step6 v1")
+        raise ValueError("parallel_instances is reserved but not implemented")
 
     cache_config = config.get("cache", {})
     if cache_config is not None and not isinstance(cache_config, Mapping):
@@ -316,6 +321,8 @@ def _aggregate_row(
         raise ValueError("capacity sweep token invariant failed")
 
     ttft_values = [item.ttft_ms for item in request_metrics]
+    kv_load_values = [item.kv_load_ms for item in request_metrics]
+    total_kv_load_ms = sum(kv_load_values)
     return CapacitySweepRow(
         hbm_capacity_blocks=capacity,
         scope=scope,
@@ -334,6 +341,11 @@ def _aggregate_row(
         p90_ttft_ms=percentile(ttft_values, 90),
         p99_ttft_ms=percentile(ttft_values, 99),
         cache_event_count=cache_event_count,
+        total_kv_load_ms=total_kv_load_ms,
+        avg_kv_load_ms=_safe_rate(total_kv_load_ms, len(request_metrics)),
+        p50_kv_load_ms=percentile(kv_load_values, 50),
+        p90_kv_load_ms=percentile(kv_load_values, 90),
+        p99_kv_load_ms=percentile(kv_load_values, 99),
     )
 
 
@@ -342,7 +354,7 @@ def _row_sort_key(row: CapacitySweepRow) -> tuple[int, int, str]:
     return (row.hbm_capacity_blocks, scope_order, row.instance_uuid)
 
 
-def _safe_rate(numerator: int, denominator: int) -> float:
+def _safe_rate(numerator: float, denominator: int) -> float:
     if denominator <= 0:
         return 0.0
     return numerator / denominator

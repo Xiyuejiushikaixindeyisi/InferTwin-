@@ -14,16 +14,29 @@ def test_validate_model_registry_loads_profiles_and_checks_consistency(
     tmp_path: Path,
 ) -> None:
     model_path = _write_model_profile(tmp_path, tokenizer_profile="glm-v5")
-    registry = ModelRegistry.from_mapping(_registry_mapping(model_profile_path=model_path.name))
+    deployment_path = _write_deployment_profile(tmp_path)
+    registry = ModelRegistry.from_mapping(
+        _registry_mapping(
+            model_profile_path=model_path.name,
+            deployment_profile_path=deployment_path.name,
+        )
+    )
 
     result = validate_model_registry(registry, base_dir=tmp_path)
 
     assert result.model_profile_by_name["glm-v5.1"].tokenizer_profile == "glm-v5"
+    assert result.deployment_profile_by_name["glm-v5.1"].name == ("glm-v5.1-vllm-ascend-prefill")
 
 
 def test_validate_model_registry_rejects_profile_name_mismatch(tmp_path: Path) -> None:
     model_path = _write_model_profile(tmp_path, model_name="qwen")
-    registry = ModelRegistry.from_mapping(_registry_mapping(model_profile_path=model_path.name))
+    deployment_path = _write_deployment_profile(tmp_path)
+    registry = ModelRegistry.from_mapping(
+        _registry_mapping(
+            model_profile_path=model_path.name,
+            deployment_profile_path=deployment_path.name,
+        )
+    )
 
     with pytest.raises(ValueError, match="references model profile"):
         validate_model_registry(registry, base_dir=tmp_path)
@@ -31,7 +44,13 @@ def test_validate_model_registry_rejects_profile_name_mismatch(tmp_path: Path) -
 
 def test_validate_model_registry_rejects_tokenizer_mismatch(tmp_path: Path) -> None:
     model_path = _write_model_profile(tmp_path, tokenizer_profile="other-tokenizer")
-    registry = ModelRegistry.from_mapping(_registry_mapping(model_profile_path=model_path.name))
+    deployment_path = _write_deployment_profile(tmp_path)
+    registry = ModelRegistry.from_mapping(
+        _registry_mapping(
+            model_profile_path=model_path.name,
+            deployment_profile_path=deployment_path.name,
+        )
+    )
 
     with pytest.raises(ValueError, match="tokenizer_profile"):
         validate_model_registry(registry, base_dir=tmp_path)
@@ -41,7 +60,11 @@ def test_validate_model_registry_rejects_default_latency_model_mismatch(
     tmp_path: Path,
 ) -> None:
     model_path = _write_model_profile(tmp_path)
-    data = _registry_mapping(model_profile_path=model_path.name)
+    deployment_path = _write_deployment_profile(tmp_path)
+    data = _registry_mapping(
+        model_profile_path=model_path.name,
+        deployment_profile_path=deployment_path.name,
+    )
     data["models"]["glm-v5.1"]["default_latency"]["model_name"] = "qwen"
     registry = ModelRegistry.from_mapping(data)
 
@@ -53,7 +76,13 @@ def test_validate_instance_model_bindings_accepts_registered_models(
     tmp_path: Path,
 ) -> None:
     model_path = _write_model_profile(tmp_path, aliases=["glm-v5"])
-    registry = ModelRegistry.from_mapping(_registry_mapping(model_profile_path=model_path.name))
+    deployment_path = _write_deployment_profile(tmp_path)
+    registry = ModelRegistry.from_mapping(
+        _registry_mapping(
+            model_profile_path=model_path.name,
+            deployment_profile_path=deployment_path.name,
+        )
+    )
     registry_validation = validate_model_registry(registry, base_dir=tmp_path)
     instances = InstanceProfile.from_mapping(_instance_profile_mapping())
 
@@ -100,7 +129,13 @@ def test_validate_instance_model_bindings_rejects_latency_model_mismatch(
     tmp_path: Path,
 ) -> None:
     model_path = _write_model_profile(tmp_path, aliases=["glm-v5"])
-    registry = ModelRegistry.from_mapping(_registry_mapping(model_profile_path=model_path.name))
+    deployment_path = _write_deployment_profile(tmp_path)
+    registry = ModelRegistry.from_mapping(
+        _registry_mapping(
+            model_profile_path=model_path.name,
+            deployment_profile_path=deployment_path.name,
+        )
+    )
     registry_validation = validate_model_registry(registry, base_dir=tmp_path)
     data = _instance_profile_mapping()
     data["instances"]["latency_profiles"]["instance-a-ttft"]["model_name"] = "qwen"
@@ -112,6 +147,135 @@ def test_validate_instance_model_bindings_rejects_latency_model_mismatch(
             model_registry=registry,
             registry_validation=registry_validation,
         )
+
+
+def test_validate_model_registry_accepts_step7_single_instance_pooling(
+    tmp_path: Path,
+) -> None:
+    model_path = _write_model_profile(tmp_path)
+    deployment_path = _write_deployment_profile(
+        tmp_path,
+        pooling=True,
+        multi_tier_cache=True,
+    )
+    data = _registry_mapping(
+        model_profile_path=model_path.name,
+        deployment_profile_path=deployment_path.name,
+    )
+    _enable_default_cache_pooling(data)
+    registry = ModelRegistry.from_mapping(data)
+
+    result = validate_model_registry(registry, base_dir=tmp_path)
+
+    assert result.deployment_profile_by_name["glm-v5.1"].cache_features.pooling is True
+
+
+def test_validate_model_registry_rejects_deployment_pooling_without_cache_pooling(
+    tmp_path: Path,
+) -> None:
+    model_path = _write_model_profile(tmp_path)
+    deployment_path = _write_deployment_profile(tmp_path, pooling=True)
+    registry = ModelRegistry.from_mapping(
+        _registry_mapping(
+            model_profile_path=model_path.name,
+            deployment_profile_path=deployment_path.name,
+        )
+    )
+
+    with pytest.raises(ValueError, match="default_cache.pooling.enabled is false"):
+        validate_model_registry(registry, base_dir=tmp_path)
+
+
+def test_validate_model_registry_rejects_multitier_without_cache_pooling(
+    tmp_path: Path,
+) -> None:
+    model_path = _write_model_profile(tmp_path)
+    deployment_path = _write_deployment_profile(tmp_path, multi_tier_cache=True)
+    registry = ModelRegistry.from_mapping(
+        _registry_mapping(
+            model_profile_path=model_path.name,
+            deployment_profile_path=deployment_path.name,
+        )
+    )
+
+    with pytest.raises(ValueError, match="multi_tier_cache"):
+        validate_model_registry(registry, base_dir=tmp_path)
+
+
+def test_validate_model_registry_rejects_cache_pooling_without_deployment_pooling(
+    tmp_path: Path,
+) -> None:
+    model_path = _write_model_profile(tmp_path)
+    deployment_path = _write_deployment_profile(tmp_path, pooling=False)
+    data = _registry_mapping(
+        model_profile_path=model_path.name,
+        deployment_profile_path=deployment_path.name,
+    )
+    _enable_default_cache_pooling(data)
+    registry = ModelRegistry.from_mapping(data)
+
+    with pytest.raises(ValueError, match="cache_features.pooling=false"):
+        validate_model_registry(registry, base_dir=tmp_path)
+
+
+def test_validate_model_registry_rejects_pooling_without_ddr_capacity(
+    tmp_path: Path,
+) -> None:
+    model_path = _write_model_profile(tmp_path)
+    deployment_path = _write_deployment_profile(tmp_path, pooling=True)
+    data = _registry_mapping(
+        model_profile_path=model_path.name,
+        deployment_profile_path=deployment_path.name,
+    )
+    _enable_default_cache_pooling(data, ddr_capacity=None)
+    registry = ModelRegistry.from_mapping(data)
+
+    with pytest.raises(ValueError, match="ddr_capacity_blocks is required"):
+        validate_model_registry(registry, base_dir=tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("flag", "value", "match"),
+    [
+        ("single_instance", False, "single_instance must be true"),
+        ("multi_instance", True, "multi_instance is not supported"),
+        ("ddr_enabled", False, "ddr_enabled must be true"),
+        ("remote_enabled", True, "remote_enabled is not supported"),
+        ("ssd_enabled", True, "ssd_enabled is not supported"),
+    ],
+)
+def test_validate_model_registry_rejects_unsupported_pooling_flags(
+    tmp_path: Path,
+    flag: str,
+    value: bool,
+    match: str,
+) -> None:
+    model_path = _write_model_profile(tmp_path)
+    deployment_path = _write_deployment_profile(tmp_path, pooling=True)
+    data = _registry_mapping(
+        model_profile_path=model_path.name,
+        deployment_profile_path=deployment_path.name,
+    )
+    _enable_default_cache_pooling(data)
+    data["models"]["glm-v5.1"]["default_cache"]["pooling"][flag] = value
+    registry = ModelRegistry.from_mapping(data)
+
+    with pytest.raises(ValueError, match=match):
+        validate_model_registry(registry, base_dir=tmp_path)
+
+
+def test_validate_model_registry_rejects_kv_transfer(tmp_path: Path) -> None:
+    model_path = _write_model_profile(tmp_path)
+    deployment_path = _write_deployment_profile(tmp_path, kv_transfer=True)
+    registry = ModelRegistry.from_mapping(
+        _registry_mapping(
+            model_profile_path=model_path.name,
+            deployment_profile_path=deployment_path.name,
+        )
+    )
+
+    with pytest.raises(ValueError, match="kv_transfer enabled"):
+        validate_model_registry(registry, base_dir=tmp_path)
 
 
 def _write_model_profile(
@@ -136,15 +300,51 @@ model:
     return path
 
 
+def _write_deployment_profile(
+    tmp_path: Path,
+    *,
+    pooling: bool = False,
+    multi_tier_cache: bool = False,
+    kv_transfer: bool = False,
+) -> Path:
+    path = tmp_path / "deployment.yaml"
+    path.write_text(
+        f"""
+deployment:
+  name: glm-v5.1-vllm-ascend-prefill
+  engine: vllm-ascend
+  scheduler:
+    max_num_seqs: 32
+    max_num_batched_tokens: 8192
+    enable_chunked_prefill: true
+  cache_features:
+    prefix_caching: true
+    multi_tier_cache: {str(multi_tier_cache).lower()}
+    pooling: {str(pooling).lower()}
+    kv_transfer: {str(kv_transfer).lower()}
+    runtime_block_size: 128
+""",
+        encoding="utf-8",
+    )
+    return path
+
+
 def _registry_mapping(
     model_profile_path: str = "configs/models/glm-v5.1.yaml",
+    deployment_profile_path: str = "configs/deployments/glm-v5.1-vllm-ascend-prefill.yaml",
 ) -> dict[str, object]:
     return {
         "models": {
             "glm-v5.1": {
                 "model_profile_path": model_profile_path,
+                "deployment_profile_path": deployment_profile_path,
                 "tokenizer_profile": "glm-v5",
                 "chat_template_profile": "glm-v5",
+                "default_cache": {
+                    "hbm_capacity_blocks": 4096,
+                    "block_size_tokens": 128,
+                    "eviction_policy": "lru",
+                },
                 "default_latency": {
                     "backend": "fitted_ttft",
                     "model_name": "glm-v5.1",
@@ -159,6 +359,24 @@ def _registry_mapping(
                 },
             }
         }
+    }
+
+
+def _enable_default_cache_pooling(
+    data: dict[str, object],
+    *,
+    ddr_capacity: int | None = 65536,
+) -> None:
+    default_cache = data["models"]["glm-v5.1"]["default_cache"]
+    if ddr_capacity is not None:
+        default_cache["ddr_capacity_blocks"] = ddr_capacity
+    default_cache["pooling"] = {
+        "enabled": True,
+        "single_instance": True,
+        "multi_instance": False,
+        "ddr_enabled": True,
+        "remote_enabled": False,
+        "ssd_enabled": False,
     }
 
 

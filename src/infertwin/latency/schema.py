@@ -1,4 +1,4 @@
-"""Batch latency schema for Step4 replay."""
+"""Batch latency schema for batch-aware replay."""
 
 from __future__ import annotations
 
@@ -19,6 +19,9 @@ class ShapeKey:
     scheduled_decode_tokens: int
     max_query_len: int
     total_context_tokens: int
+    kv_load_tokens: int = 0
+    kv_load_bytes: int = 0
+    kv_load_request_count: int = 0
 
     @classmethod
     def from_shape(
@@ -38,6 +41,9 @@ class ShapeKey:
             scheduled_decode_tokens=shape.scheduled_decode_tokens,
             max_query_len=shape.max_query_len,
             total_context_tokens=shape.total_context_tokens,
+            kv_load_tokens=shape.kv_load_tokens,
+            kv_load_bytes=shape.kv_load_bytes,
+            kv_load_request_count=shape.kv_load_request_count,
         )
 
     def __str__(self) -> str:
@@ -50,6 +56,9 @@ class ShapeKey:
             f"decode={self.scheduled_decode_tokens}",
             f"maxq={self.max_query_len}",
             f"ctx={self.total_context_tokens}",
+            f"kvload_tokens={self.kv_load_tokens}",
+            f"kvload_bytes={self.kv_load_bytes}",
+            f"kvload_reqs={self.kv_load_request_count}",
         )
         return "|".join(parts)
 

@@ -29,6 +29,23 @@ def test_materialized_blocks_are_visible_to_later_lookup() -> None:
     assert cache.resident_blocks == 2
 
 
+def test_materialize_event_uses_requested_reason() -> None:
+    block = _block("a", 0)
+    cache = HBMCache(capacity_blocks=4)
+
+    cache.materialize(
+        (block,),
+        now_ms=10.0,
+        request_id="r1",
+        instance_uuid="i1",
+        reason="progressive_chunk_materialization",
+    )
+
+    (event,) = cache.take_events()
+    assert event.event_type == MATERIALIZE
+    assert event.reason == "progressive_chunk_materialization"
+
+
 def test_lookup_only_hits_contiguous_prefix() -> None:
     requested = (_block("a", 0), _block("b", 1), _block("c", 2))
     cache = HBMCache(capacity_blocks=4)
