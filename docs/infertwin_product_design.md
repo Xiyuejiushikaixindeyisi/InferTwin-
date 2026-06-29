@@ -82,7 +82,7 @@ InferTwin 当前产品分为两层：
 
 ## 3. 当前核心仿真器能力
 
-Step1-Step8 与工程优化阶段已完成核心离线 replay 骨架、单实例 DDR/CPU pooling hit accounting 和 KV load latency accounting。
+Step1-Step9 与工程优化阶段已完成核心离线 replay 骨架、单实例 DDR/CPU pooling hit accounting、KV load latency accounting 和 progressive chunk timeline。
 
 当前已实现：
 
@@ -113,6 +113,12 @@ Step1-Step8 与工程优化阶段已完成核心离线 replay 骨架、单实例
 - model-owned runtime defaults，包括 default cache metadata、block size、eviction policy 和 deployment-derived scheduler 参数。
 - calibration failure fallback policy schema，当前仅为未来 external calibration harness 预留。
 - 实例级 / 模型默认 `kv_load` latency profile，可通过 zero、token-linear、byte-linear mode 控制 DDR/CPU hit 的 KV load latency。
+- progressive timeline replay mode：`batch_aware_hbm_ddr_lru_progressive_timeline`。
+- compute wait accounting：request 已进入 engine 但等待 chunked prefill scheduler 选中的时间。
+- KV load wait accounting：DDR hit 的 deterministic queue wait + service time。
+- chunk-level TTFT composition：`compute_wait_ms + kv_load_wait_ms + uncached_prefill_compute_ms + unattributed_ttft_ms`。
+- progressive full-block materialization：scheduled chunk finish 后 newly completed full blocks 可见，partial block 仍不可见。
+- Step9 timeline aggregate fields in streaming capacity sweep typed result。
 - HBM capacity sweep runner。
 - `RunSpec` / profile schema / `ConfigGuard` foundation。
 - profile-aware request build path。
@@ -156,9 +162,8 @@ CSV trace
 - 真实物理 KV tensor。
 - physical KV slot allocation。
 - pinned / refcount。
-- progressive block visibility / progressive block materialization。
 - compute/load overlap。
-- KV load queue、shared bandwidth backpressure、priority 和 load completion event。
+- 真实 KV transfer queue、shared bandwidth backpressure、priority 和 load completion event。
 - DDR hit promotion。
 - SSD / remote cache tier。
 - Decode / TPOT 建模。
@@ -172,7 +177,8 @@ CSV trace
 
 - single-instance DDR/CPU pooling hit accounting 已在 Step7 完成。
 - DDR/CPU 命中的 KV load latency accounting 已在 Step8 完成；Step8 v1 默认不建模 overlap、promotion、load queue/backpressure 或 load completion event。
-- progressive block visibility 是 V1 必须补齐的核心能力，放到 Step9 作为独立 replay/cache mode 处理。
+- progressive block visibility / chunk-level TTFT timeline 已在 Step9 完成；仅在 `batch_aware_hbm_ddr_lru_progressive_timeline` mode 中启用，legacy mode 仍保持 finish-time materialization。
+- Step9 的 shared-link FIFO 是 deterministic accounting abstraction，不是真实 Mooncake / TransferEngine。
 - Decode / TPOT 建模进入 V2 pending。只有在出现明确 Decode 建模需求，且目标模型部署形态是 PD 混部时，才开启 decode-aware scheduler / replay mode 设计。
 
 这些内容不是被否定，而是待设计、待实现的核心仿真器能力。
@@ -183,7 +189,7 @@ V1 核心仿真器准出范围：
 
 1. Step7：单实例池化，已完成。单个实例可以在 DDR/CPU 侧额外 KV cache 存储中命中，并输出 DDR hit accounting。
 2. Step8：KV load latency，已完成。为 DDR/CPU 等非 HBM 命中增加加载时延建模。
-3. Step9：progressive chunk visibility，下一阶段。chunk 生成后即可成为后续请求的 KV cache hit 候选，不再等待整个 prompt prefill 完成；TTFT prefill 时间由多个 uncached-token chunk 组合。
+3. Step9：progressive chunk visibility / chunk-level TTFT timeline，已完成。chunk finish 后 newly completed full blocks 可以成为后续请求的 KV cache hit 候选；TTFT prefill 时间由 compute wait、KV load wait、多个 uncached-token chunk 和 replay residual 组合。
 
 V2 之后再处理：
 

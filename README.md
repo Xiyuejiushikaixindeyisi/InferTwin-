@@ -212,8 +212,9 @@ V1 core-simulator exit scope:
   DDR/CPU-side storage.
 - Step8: KV load latency modeling for non-HBM hits.
 - Step9: progressive chunk visibility, where generated full chunks can become
-  cache-hit candidates before the whole prompt finishes. TTFT prefill time must
-  be composed from uncached-token chunks instead of one whole-request formula.
+  cache-hit candidates before the whole prompt finishes. TTFT prefill time can
+  be explained by compute wait, KV load wait, uncached-token chunks, and replay
+  residual fields in the progressive timeline mode.
 
 V2-or-later core-simulator scope:
 
@@ -337,13 +338,13 @@ meaning.
   `miss_tokens = 0`.
 - Cache lookup happens when a request is first eligible to be considered by the
   scheduler, not when it arrives in the trace.
-- Cache materialization happens only after a request's prefill finishes. Blocks
-  materialized at an iteration finish are not visible within the same iteration.
-  This is a conservative offline replay rule, not a physical vLLM block-manager
-  timeline. Real vLLM / vLLM-Ascend deployments may expose full blocks
-  progressively during prefill; InferTwin's `batch_aware_hbm_lru` mode does not.
-  Step9 must add progressive chunk visibility as a new replay/cache mode instead
-  of changing this mode's materialization semantics.
+- Legacy cache materialization happens only after a request's prefill finishes.
+  Blocks materialized at an iteration finish are not visible within the same
+  iteration. This remains true for `batch_aware_hbm_lru` and
+  `batch_aware_hbm_ddr_lru`.
+- Step9 adds `batch_aware_hbm_ddr_lru_progressive_timeline`, where scheduled
+  chunk finish can make newly completed full blocks visible. Partial blocks are
+  still not visible, and legacy modes keep finish-time materialization.
 - `ttft_ms = finish_time_ms - arrival_time_ms`.
 - Request-level TTFT is modeled as
   `queue_waiting_ms + uncached_prefill_compute_ms + kv_load_ms`. Current replay

@@ -16,7 +16,7 @@ InferTwin 是面向 TOB 大型推理服务集群的离线仿真器。
 
 - Step7：单实例 DDR/CPU pooling hit accounting，已完成。
 - Step8：KV load latency，已完成。
-- Step9：progressive chunk/block visibility，下一阶段。
+- Step9：progressive chunk/block visibility / chunk-level TTFT timeline，已完成。
 
 V2 之后再处理 gateway、实例侧排队、多实例池化跨实例命中、Decode / TPOT、复杂 Hybrid 模型和新一轮大规模工程优化。
 
@@ -111,8 +111,9 @@ PYTHONPATH=src python -m infertwin.cli.main sweep-streaming --config <config.yam
 - 不部署真实模型；TTFT 由 fitted profile / future latency component 估算。
 - 不保存真实 KV tensor；只保存 block hash 和 metadata。
 - 不建模 physical KV slot、refcount、pin、fragmentation。
-- finish-time materialization 可能低估长 prefill 期间的 block reuse；Step9 必须新增 progressive mode。
-- Step8 已补 DDR/CPU hit 的 KV load latency；默认仍不建模 compute/load overlap、load queue/backpressure 或 promotion。
+- legacy `batch_aware_hbm_lru` / `batch_aware_hbm_ddr_lru` 仍采用 finish-time materialization。
+- Step9 已新增 `batch_aware_hbm_ddr_lru_progressive_timeline`，chunk finish 后 newly completed full blocks 可见。
+- Step8 已补 DDR/CPU hit 的 KV load latency；Step9 已补 deterministic shared-link FIFO wait accounting，但仍不是真实 Mooncake / TransferEngine backpressure。
 - DDR hit 当前不做 promotion。
 - Decode / TPOT 未建模，V2 pending。
 - 不做 gateway routing；fixed-routing trace 内的多实例互相隔离 replay。
@@ -217,7 +218,7 @@ true streaming 大 trace
 
 默认不要读取整个 project、整个 `docs/archive/` 或全部 review 文档。需要历史依据时，只读取指定 archive / review 文件。
 
-## 8. 当前 Step9 开发入口
+## 8. 当前 StepY 开发入口
 
 Step8 已完成 KV load latency 并归档：
 
@@ -238,13 +239,28 @@ Step8 稳定语义：
 - Ramulator2 / Mooncake 只作为 calibration source / adapter 边界，不作为默认在线 replay 依赖。
 - 不做 DDR hit promotion、load queue/backpressure、load completion event 或 online external replay。
 
-当前下一阶段是 Step9。Step9 属于核心仿真器，目标是 progressive chunk/block visibility。
+Step9 已完成 progressive chunk/block visibility / chunk-level TTFT timeline，并通过核心仿真器 review 与工程收口：
 
-Step9 约束：
+```text
+docs/archive/step9/
+docs/reviews/step9_core_simulator_review.md
+docs/reviews/step9_engineering_closure.md
+```
 
-- 不修改默认 `batch_aware_hbm_ddr_lru` 的 finish-time materialization 语义。
-- 新增 progressive replay/cache mode，例如 `batch_aware_hbm_ddr_lru_progressive`。
-- 必须明确 chunk 完成、block 可见、后续 lookup 的时间关系。
+Step9 稳定语义：
+
+- 不修改默认 `batch_aware_hbm_lru` / `batch_aware_hbm_ddr_lru` 的 finish-time materialization 语义。
+- 新增 `batch_aware_hbm_ddr_lru_progressive_timeline` mode。
+- progressive mode 下，scheduled chunk finish 后 newly completed full miss blocks 可以进入 cache。
+- progressive mode 下，TTFT 由 `compute_wait_ms + kv_load_wait_ms + uncached_prefill_compute_ms + unattributed_ttft_ms` 组成。
+- `unattributed_ttft_ms` 是 replay 粒度残差，不是物理建模结果。
+- shared-link FIFO 是 deterministic accounting abstraction，不是真实 Mooncake / TransferEngine。
+
+当前下一阶段暂称 StepY。StepY 的产品形态和技术路线尚未定义，进入前必须重新声明：
+
+```text
+本阶段开发的是核心仿真器，还是外围能力。
+```
 
 V2 约束：
 

@@ -5,7 +5,7 @@
 注意：早期 `README.md` 中的 Step9 技术路线已作废。正式技术路线以以下文件为准：
 
 ```text
-docs/step9/02_technical_route.md
+docs/archive/step9/02_technical_route.md
 ```
 
 当前 Step9 文档：
@@ -36,4 +36,4 @@ docs/step9/02_technical_route.md
 - S9-H：Streaming Integration / Report Fields，已完成。
 - S9-I：E2E，已完成。
 
-说明：S9-I 只完成 E2E 验收，不包含 Step9 review、主文档更新、全局记忆更新、归档或工程收口。
+说明：S9-I 只完成 E2E 验收，不包含 Step9 review、主文档更新、全局记忆更新、归档或工程收口。Step9 review 与工程收口记录位于 `docs/reviews/step9_core_simulator_review.md` 和 `docs/reviews/step9_engineering_closure.md`。

@@ -1,8 +1,8 @@
 # S9-G Implementation Plan: Progressive Full-Block Materialization
 
-状态：待审批，未开发。
+状态：已审批通过，已开发完成。
 
-本文件是 S9-G 的代码编写方案。用户审批通过前，不进行业务代码修改。
+本文件是 S9-G 的代码编写方案与执行记录。
 
 ## 1. Batch 定位
 

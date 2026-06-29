@@ -8,13 +8,13 @@ InferTwin 是面向 TOB 大型推理服务集群的离线仿真器。
 
 当前已完成固定 trace、固定实例路由、固定 cache/latency 配置下的 HBM capacity sweep，能够按不同 `hbm_capacity_blocks` 输出 cache 容量、KV cache hit rate 与 P90 TTFT 的关系表。target-based hit floor solver / P90 target matching 属于外围能力，不是核心仿真器本身。
 
-Step1-Step8 已完成核心仿真骨架、单实例 DDR/CPU pooling hit accounting 和 KV load latency accounting。V1 review repair 已完成 RP-A 到 RP-H 并归档，修正 trace schema、registry-relative path、streaming sorted guard、model-bound runtime defaults 和 streaming runner integration；Step7 与 Step8 均已完成并归档。
+Step1-Step9 已完成核心仿真骨架、单实例 DDR/CPU pooling hit accounting、KV load latency accounting 和 progressive chunk timeline。V1 review repair 已完成 RP-A 到 RP-H 并归档，修正 trace schema、registry-relative path、streaming sorted guard、model-bound runtime defaults 和 streaming runner integration；Step7、Step8 与 Step9 均已完成并归档。
 
 V1 核心仿真器准出范围：
 
 - Step7：单实例池化，已完成。单个实例可以在 DDR/CPU 侧额外 KV cache 存储中命中。
 - Step8：KV load latency，已完成。为 DDR/CPU 等非 HBM 命中增加加载时延建模。
-- Step9：progressive chunk visibility，下一阶段。chunk 生成后即可成为后续请求的 KV cache hit 候选；TTFT prefill 时间由多个 uncached-token chunk 组合，而不是直接用完整 uncached tokens 一次计算。
+- Step9：progressive chunk visibility / chunk-level TTFT timeline，已完成。chunk finish 后 newly completed full blocks 可以成为后续请求的 KV cache hit 候选；TTFT prefill 时间由 compute wait、KV load wait、多个 uncached-token chunk 和 replay residual 组合。
 
 V2 之后再处理复杂 Hybrid 模型、gateway、实例侧排队、多实例池化跨实例命中、Decode / TPOT 和新一轮大规模工程优化。
 
@@ -111,12 +111,12 @@ InferTwin 必须区分核心仿真器和外围能力。
 
 ## 当前阶段
 
-工程优化阶段、true streaming 专项、Pre-Step7 Model Registry & Instance Model Binding 专项、V1 review repair、Step7 单实例池化和 Step8 KV load latency 均已完成。
+工程优化阶段、true streaming 专项、Pre-Step7 Model Registry & Instance Model Binding 专项、V1 review repair、Step7 单实例池化、Step8 KV load latency 和 Step9 progressive timeline 均已完成。
 
 当前阶段：
 
 ```text
-Step8 已完成并归档；当前准备进入 Step9：progressive chunk/block visibility。
+Step9 已完成并归档；当前准备进入 StepY。StepY 的产品形态和技术路线尚未定义，进入前必须重新声明本阶段属于核心仿真器还是外围能力。
 ```
 
 Step7 归档与 review：
@@ -133,6 +133,14 @@ docs/archive/step8/
 docs/reviews/step8_core_simulator_review.md
 docs/reviews/step8_review.md
 docs/reviews/step8_engineering_closure.md
+```
+
+Step9 归档与 review：
+
+```text
+docs/archive/step9/
+docs/reviews/step9_core_simulator_review.md
+docs/reviews/step9_engineering_closure.md
 ```
 
 Step7 完成内容：
@@ -172,7 +180,7 @@ Step8 保持边界：
 - 不改变 `batch_aware_hbm_ddr_lru` 的 cache hit semantics。
 - 不改变 finish-time materialization。
 - 不做 DDR hit promotion、load queue/backpressure、load completion event、compute/load overlap 或 online Ramulator2 / Mooncake replay。
-- 如果需要改变 cache hit 可见性或 materialization semantics，必须进入 Step9，并新增 replay/cache mode。
+- cache hit 可见性和 materialization semantics 的改变已在 Step9 通过新 replay/cache mode 实现；legacy mode 仍保持上述 Step8 语义。
 
 Step8 验证：
 
@@ -180,6 +188,34 @@ Step8 验证：
 Step8 targeted + resolver E2E: 88 passed
 Full pytest: 367 passed
 ruff check src tests scripts: passed
+git diff --check: passed
+```
+
+Step9 收口结论：
+
+```text
+具备进入 StepY 产品形态和技术路线讨论的条件。
+```
+
+Step9 完成内容：
+
+- 新增 `batch_aware_hbm_ddr_lru_progressive_timeline` mode。
+- legacy `batch_aware_hbm_lru` / `batch_aware_hbm_ddr_lru` 保持 finish-time materialization。
+- 新增 replay timeline schema 和 typed metrics。
+- progressive mode 下显式统计 `compute_wait_ms`。
+- progressive mode 下显式统计 `kv_load_wait_ms`。
+- 新增 deterministic instance-local `SharedLinkFIFOTransferQueue`，用于 KV load wait accounting；它不是真实 Mooncake / TransferEngine。
+- 新增 `RequestTTFTComposer`，progressive TTFT 由 `compute_wait_ms + kv_load_wait_ms + uncached_prefill_compute_ms + unattributed_ttft_ms` 闭合。
+- 新增 `ProgressiveFullBlockMaterializationPolicy`，scheduled chunk finish 后 newly completed full miss blocks 可见，partial block 仍不可见。
+- `sweep-streaming` 已接入 progressive mode 和 Step9 timeline aggregate fields。
+- `capacity_sweep.csv` / `summary.md` 只消费 typed result，不重算 replay 语义。
+
+Step9 验证：
+
+```text
+Step9 targeted tests: 51 passed
+Full pytest: 439 passed
+ruff check src tests: passed
 git diff --check: passed
 ```
 
@@ -487,7 +523,7 @@ True streaming 当前限制：
 - JSONL shard 保存 prefix block hash chain，长 prompt 下磁盘体积会变大。
 - exact percentile 仍保存 TTFT list，百万级 request 需要显式 quantile policy。
 - 多实例 replay 当前串行。
-- 不解决 progressive block visibility、Decode / TPOT、multi-tier cache 或 cross-instance pooling。
+- true streaming 专项本身不解决 Decode / TPOT、multi-tier remote cache 或 cross-instance pooling；progressive block visibility 已在 Step9 通过 streaming progressive timeline mode 补齐。
 
 工程优化已归档到：
 
@@ -501,7 +537,7 @@ docs/archive/engineering_optimization/
 - vLLM cached_tokens usage 语义已通过 EO-H 贯穿 replay lookup metrics。
 - cache event raw hit 与 report usage cached_tokens 是两个口径。
 - 旧 `capacity_sweep` path 仍保留 in-memory accepted request list；true streaming path 已通过 `capacity_sweep_streaming` 提供 opt-in 大 trace 入口。
-- finish-time materialization 可能低估长 prefill 期间的 block reuse，这是必须补齐的核心能力，当前决策是放到 Step9 通过新 replay/cache mode 实现。
+- finish-time materialization 可能低估长 prefill 期间的 block reuse；该问题已在 Step9 通过新 progressive timeline mode 补齐，legacy mode 仍保持旧语义。
 - Decode / TPOT 建模当前保持 pending；只有在存在明确 Decode 建模需求，且目标部署形态是 PD 混部时开启。
 - 2026-06-26 已清理未接入主链路、coverage 为 0 的 scaffold / legacy 源码模块；清理不改变 `batch_aware_hbm_lru` replay 能力。未来若需要 lookup table latency、generic cache simulator、hit floor search 等能力，应按新 schema / 新入口重新引入。
 
@@ -711,19 +747,19 @@ docs/archive/step6/03_acceptance_e2e.md
 
 ## 仍未实现
 
-Step8 收口后的待开发项必须按类型处理，不得把未实现能力写成已实现，也不得把外围能力写成核心仿真器。
+Step9 收口后的待开发项必须按类型处理，不得把未实现能力写成已实现，也不得把外围能力写成核心仿真器。
 
 V1 必须完成：
 
-- Step9 progressive chunk/block visibility。当前默认 finish-time materialization 可能低估长 prefill 期间的 block reuse；不影响当前默认 mode 的 deterministic replay，但 Step9 必须新增 progressive replay/cache mode，例如 `batch_aware_hbm_ddr_lru_progressive`。
-- Step9 TTFT chunk composition。当前 TTFT 已有 `queue + compute + kv_load` 组合，但 request 内部尚未按多个 uncached-token chunk 展开；应在 Step9 progressive mode 中扩展 latency shape / typed result。
+- 当前 V1 必须完成项已完成。进入 StepY 前仍需重新定义阶段范围、验收标准和风险控制。
 
 V2 核心仿真器待开发：
 
-- compute/load overlap。当前 `overlap_mode=none_v1` 保守相加，不影响 cache hit accounting；后续通过新 overlap policy / latency component mode 实现。
-- KV load queue / bandwidth backpressure / priority / load completion event。当前只做 iteration 级 `shared_link_sum`，高并发传输等待需新增 KV transfer scheduler/backend。
+- compute/load overlap。当前不做 same-request layerwise compute/load overlap；后续通过新 overlap policy / latency component mode 实现。
+- 真实 KV transfer backpressure / priority / load completion event。Step9 的 shared-link FIFO 是 deterministic accounting abstraction，不是真实 Mooncake / HCCL / RDMA / DMA transfer engine；后续需新增 KV transfer timeline backend。
 - DDR hit promotion。当前 DDR hit 不自动写 HBM；后续需要新增 load completion event、promotion policy 和 HBM target allocation policy。
-- layer / page / chunk 级 KV load split。当前 KV load v1 是 iteration 聚合；后续新增 `KVLoadBatchShape` / `KVLoadChunkShape` 等 schema，并默认控制事件量。
+- layer / page / chunk 级 KV load split。当前 KV load v1 仍是 scheduler/request aggregate；后续新增 `KVLoadBatchShape` / `KVLoadChunkShape` 等 schema，并默认控制事件量。
+- per-chunk timeline dump。Step9 只输出 aggregate，不默认输出 per-chunk 明细；后续可新增 opt-in dump sink 和 sampling/retention policy。
 - remote KV load、SSD tier、cross-instance pooling。当前只支持本实例 HBM + DDR/CPU；后续新增 cache tier backend、remote store adapter、pooling index schema 和 per-tier metrics。
 - gateway routing simulation。当前核心输入是 routed trace；V2 新增 gateway simulator layer 和 routing policy。
 - instance-side queue simulation。当前 `queue_waiting_ms=0`；后续新增 instance admission queue layer，不把 queue waiting 塞入 static latency profile。

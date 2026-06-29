@@ -9,7 +9,7 @@
 
 依据：
 
-- `docs/step9/01_source_alignment_and_error_analysis.md`
+- `docs/archive/step9/01_source_alignment_and_error_analysis.md`
 - `docs/archive/step8/04_kv_load_overlap_and_source_study.md`
 - `docs/archive/step8/05_technical_route.md`
 

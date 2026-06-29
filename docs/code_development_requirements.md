@@ -332,6 +332,6 @@ true streaming 大 trace
 
 Step8 已完成 KV load latency accounting；后续开发不得静默改变 Step7 / Step8 已冻结的 HBM / DDR hit 判定和 KV load typed metrics 语义。
 
-Step9 progressive visibility 必须新增独立 mode，不能直接改变默认 `batch_aware_hbm_ddr_lru` 的 finish-time materialization 语义。
+Step9 progressive visibility 已通过独立 mode `batch_aware_hbm_ddr_lru_progressive_timeline` 接入。后续不得直接改变默认 `batch_aware_hbm_ddr_lru` 的 finish-time materialization 语义。
 
 V2 的 gateway、instance queue、cross-instance pooling、Decode / TPOT、Hybrid / sparse attention cache 必须作为独立模块或新 mode 接入。
