@@ -10,6 +10,7 @@ from infertwin.experiment.sweep import (
     sort_capacity_rows,
 )
 from infertwin.replay.metrics import BatchAwareRequestMetrics, IterationMetrics
+from infertwin.replay.timeline import CHUNK_TTFT_GRANULARITY, PROGRESSIVE_TIMELINE_MODE
 
 
 def test_build_capacity_rows_aggregates_trace_and_instances() -> None:
@@ -24,6 +25,11 @@ def test_build_capacity_rows_aggregates_trace_and_instances() -> None:
                 hbm_hit_tokens=4,
                 ttft_ms=30.0,
                 kv_load_ms=3.0,
+                compute_wait_ms=2.0,
+                kv_load_wait_ms=1.0,
+                uncached_prefill_compute_ms=20.0,
+                chunk_count=2,
+                progressive_materialized_tokens=4,
             ),
             _request_metric(
                 "r2",
@@ -32,6 +38,10 @@ def test_build_capacity_rows_aggregates_trace_and_instances() -> None:
                 hbm_hit_tokens=10,
                 ttft_ms=10.0,
                 kv_load_ms=0.0,
+                compute_wait_ms=0.0,
+                kv_load_wait_ms=0.0,
+                uncached_prefill_compute_ms=4.0,
+                chunk_count=1,
             ),
             _request_metric(
                 "r3",
@@ -40,12 +50,17 @@ def test_build_capacity_rows_aggregates_trace_and_instances() -> None:
                 hbm_hit_tokens=0,
                 ttft_ms=20.0,
                 kv_load_ms=2.0,
+                compute_wait_ms=4.0,
+                kv_load_wait_ms=2.0,
+                uncached_prefill_compute_ms=6.0,
+                chunk_count=2,
+                progressive_materialized_tokens=8,
             ),
         ),
         iteration_metrics=(
-            _iteration_metric("instance-a", 0),
-            _iteration_metric("instance-b", 0),
-            _iteration_metric("instance-a", 1),
+            _iteration_metric("instance-a", 0, waiting_for_compute_count=1),
+            _iteration_metric("instance-b", 0, waiting_for_kv_load_count=1),
+            _iteration_metric("instance-a", 1, kv_transfer_queue_depth_max=2),
         ),
         cache_event_stats=stats,
     )
@@ -70,6 +85,19 @@ def test_build_capacity_rows_aggregates_trace_and_instances() -> None:
     assert trace_row.p50_kv_load_ms == 2.0
     assert trace_row.p90_kv_load_ms == 3.0
     assert trace_row.p99_kv_load_ms == 3.0
+    assert trace_row.total_compute_wait_ms == 6.0
+    assert trace_row.avg_compute_wait_ms == pytest.approx(2.0)
+    assert trace_row.p90_compute_wait_ms == 4.0
+    assert trace_row.total_kv_load_wait_ms == 3.0
+    assert trace_row.p90_kv_load_wait_ms == 2.0
+    assert trace_row.total_uncached_prefill_compute_ms == 30.0
+    assert trace_row.p90_uncached_prefill_compute_ms == 20.0
+    assert trace_row.total_chunk_count == 5
+    assert trace_row.total_progressive_materialized_tokens == 12
+    assert trace_row.total_waiting_for_compute_count == 1
+    assert trace_row.total_waiting_for_kv_load_count == 1
+    assert trace_row.total_scheduled_chunk_count == 3
+    assert trace_row.max_kv_transfer_queue_depth == 2
     assert trace_row.cache_event_count == 12
 
     instance_rows = {row.instance_uuid: row for row in rows[1:]}
@@ -79,11 +107,66 @@ def test_build_capacity_rows_aggregates_trace_and_instances() -> None:
     assert instance_rows["instance-a"].iteration_count == 2
     assert instance_rows["instance-a"].total_kv_load_ms == 2.0
     assert instance_rows["instance-a"].p90_kv_load_ms == 2.0
+    assert instance_rows["instance-a"].total_compute_wait_ms == 4.0
+    assert instance_rows["instance-a"].total_progressive_materialized_tokens == 8
+    assert instance_rows["instance-a"].max_kv_transfer_queue_depth == 2
     assert instance_rows["instance-a"].cache_event_count == 0
     assert instance_rows["instance-b"].request_count == 1
     assert instance_rows["instance-b"].iteration_count == 1
     assert instance_rows["instance-b"].total_kv_load_ms == 3.0
+    assert instance_rows["instance-b"].total_compute_wait_ms == 2.0
+    assert instance_rows["instance-b"].total_progressive_materialized_tokens == 4
     assert instance_rows["instance-b"].cache_event_count == 0
+
+
+def test_build_capacity_rows_preserves_progressive_timeline_mode() -> None:
+    rows = build_capacity_rows(
+        capacity=8,
+        request_metrics=(
+            _request_metric(
+                "r1",
+                "instance-a",
+                prompt_tokens=8,
+                hbm_hit_tokens=4,
+                ttft_ms=4.0,
+                timeline_mode=PROGRESSIVE_TIMELINE_MODE,
+                ttft_granularity=CHUNK_TTFT_GRANULARITY,
+            ),
+        ),
+        iteration_metrics=(
+            _iteration_metric(
+                "instance-a",
+                0,
+                timeline_mode=PROGRESSIVE_TIMELINE_MODE,
+                ttft_granularity=CHUNK_TTFT_GRANULARITY,
+            ),
+        ),
+        cache_event_stats=CacheEventStats(),
+    )
+
+    assert rows[0].timeline_mode == PROGRESSIVE_TIMELINE_MODE
+    assert rows[0].ttft_granularity == CHUNK_TTFT_GRANULARITY
+
+
+def test_build_capacity_rows_rejects_mixed_timeline_mode() -> None:
+    with pytest.raises(ValueError, match="timeline_mode invariant"):
+        build_capacity_rows(
+            capacity=8,
+            request_metrics=(
+                _request_metric("r1", "instance-a", prompt_tokens=8, hbm_hit_tokens=4, ttft_ms=4.0),
+                _request_metric(
+                    "r2",
+                    "instance-a",
+                    prompt_tokens=8,
+                    hbm_hit_tokens=4,
+                    ttft_ms=4.0,
+                    timeline_mode=PROGRESSIVE_TIMELINE_MODE,
+                    ttft_granularity=CHUNK_TTFT_GRANULARITY,
+                ),
+            ),
+            iteration_metrics=(),
+            cache_event_stats=CacheEventStats(),
+        )
 
 
 def test_sort_capacity_rows_is_deterministic() -> None:
@@ -178,6 +261,13 @@ def _request_metric(
     hbm_hit_tokens: int,
     ttft_ms: float,
     kv_load_ms: float = 0.0,
+    timeline_mode: str = "legacy_iteration_v1",
+    ttft_granularity: str = "iteration",
+    compute_wait_ms: float = 0.0,
+    kv_load_wait_ms: float = 0.0,
+    uncached_prefill_compute_ms: float = 0.0,
+    chunk_count: int = 0,
+    progressive_materialized_tokens: int = 0,
 ) -> BatchAwareRequestMetrics:
     return BatchAwareRequestMetrics(
         request_id=request_id,
@@ -198,10 +288,27 @@ def _request_metric(
         effective_hit_rate=hbm_hit_tokens / prompt_tokens,
         scheduled_iteration_count=1,
         kv_load_ms=kv_load_ms,
+        timeline_mode=timeline_mode,
+        ttft_granularity=ttft_granularity,
+        compute_wait_ms=compute_wait_ms,
+        kv_load_wait_ms=kv_load_wait_ms,
+        uncached_prefill_compute_ms=uncached_prefill_compute_ms,
+        chunk_count=chunk_count,
+        progressive_materialized_blocks=1 if progressive_materialized_tokens else 0,
+        progressive_materialized_tokens=progressive_materialized_tokens,
     )
 
 
-def _iteration_metric(instance_uuid: str, iteration_id: int) -> IterationMetrics:
+def _iteration_metric(
+    instance_uuid: str,
+    iteration_id: int,
+    *,
+    timeline_mode: str = "legacy_iteration_v1",
+    ttft_granularity: str = "iteration",
+    waiting_for_compute_count: int = 0,
+    waiting_for_kv_load_count: int = 0,
+    kv_transfer_queue_depth_max: int = 0,
+) -> IterationMetrics:
     return IterationMetrics(
         instance_uuid=instance_uuid,
         iteration_id=iteration_id,
@@ -217,6 +324,12 @@ def _iteration_metric(instance_uuid: str, iteration_id: int) -> IterationMetrics
         shape_key="shape",
         memoized=False,
         request_ids=(f"r{iteration_id}",),
+        timeline_mode=timeline_mode,
+        ttft_granularity=ttft_granularity,
+        waiting_for_compute_count=waiting_for_compute_count,
+        waiting_for_kv_load_count=waiting_for_kv_load_count,
+        scheduled_chunk_count=1,
+        kv_transfer_queue_depth_max=kv_transfer_queue_depth_max,
     )
 
 

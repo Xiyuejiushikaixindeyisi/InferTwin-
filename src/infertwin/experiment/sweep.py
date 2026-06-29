@@ -25,6 +25,10 @@ from infertwin.replay.metrics import (
     BatchAwareRequestMetrics,
     IterationMetrics,
 )
+from infertwin.replay.timeline import (
+    ITERATION_TTFT_GRANULARITY,
+    LEGACY_TIMELINE_MODE,
+)
 from infertwin.scheduler.config import SchedulerConfig
 from infertwin.scheduler.vllm_like import VllmLikeBatchScheduler
 
@@ -64,6 +68,31 @@ class CapacitySweepRow:
     p50_kv_load_ms: float = 0.0
     p90_kv_load_ms: float = 0.0
     p99_kv_load_ms: float = 0.0
+    timeline_mode: str = LEGACY_TIMELINE_MODE
+    ttft_granularity: str = ITERATION_TTFT_GRANULARITY
+    total_compute_wait_ms: float = 0.0
+    avg_compute_wait_ms: float = 0.0
+    p50_compute_wait_ms: float = 0.0
+    p90_compute_wait_ms: float = 0.0
+    p99_compute_wait_ms: float = 0.0
+    total_kv_load_wait_ms: float = 0.0
+    avg_kv_load_wait_ms: float = 0.0
+    p50_kv_load_wait_ms: float = 0.0
+    p90_kv_load_wait_ms: float = 0.0
+    p99_kv_load_wait_ms: float = 0.0
+    total_uncached_prefill_compute_ms: float = 0.0
+    avg_uncached_prefill_compute_ms: float = 0.0
+    p90_uncached_prefill_compute_ms: float = 0.0
+    total_unattributed_ttft_ms: float = 0.0
+    avg_unattributed_ttft_ms: float = 0.0
+    total_chunk_count: int = 0
+    total_load_event_count: int = 0
+    total_progressive_materialized_blocks: int = 0
+    total_progressive_materialized_tokens: int = 0
+    total_waiting_for_compute_count: int = 0
+    total_waiting_for_kv_load_count: int = 0
+    total_scheduled_chunk_count: int = 0
+    max_kv_transfer_queue_depth: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -252,6 +281,8 @@ def build_capacity_rows(
     request_metrics: Sequence[BatchAwareRequestMetrics],
     iteration_metrics: Sequence[IterationMetrics],
     cache_event_stats: CacheEventStats,
+    timeline_mode: str = LEGACY_TIMELINE_MODE,
+    ttft_granularity: str = ITERATION_TTFT_GRANULARITY,
 ) -> tuple[CapacitySweepRow, ...]:
     """Aggregate one capacity replay into trace and per-instance rows."""
 
@@ -263,6 +294,8 @@ def build_capacity_rows(
             request_metrics=request_metrics,
             iteration_metrics=iteration_metrics,
             cache_event_count=cache_event_stats.total_events,
+            timeline_mode=timeline_mode,
+            ttft_granularity=ttft_granularity,
         )
     ]
 
@@ -282,6 +315,8 @@ def build_capacity_rows(
                 request_metrics=requests_by_instance[instance_uuid],
                 iteration_metrics=iterations_by_instance.get(instance_uuid, ()),
                 cache_event_count=0,
+                timeline_mode=timeline_mode,
+                ttft_granularity=ttft_granularity,
             )
         )
 
@@ -311,6 +346,8 @@ def _aggregate_row(
     request_metrics: Sequence[BatchAwareRequestMetrics],
     iteration_metrics: Sequence[IterationMetrics],
     cache_event_count: int,
+    timeline_mode: str,
+    ttft_granularity: str,
 ) -> CapacitySweepRow:
     total_prompt_tokens = sum(item.prompt_tokens for item in request_metrics)
     hbm_hit_tokens = sum(item.hbm_hit_tokens for item in request_metrics)
@@ -323,6 +360,25 @@ def _aggregate_row(
     ttft_values = [item.ttft_ms for item in request_metrics]
     kv_load_values = [item.kv_load_ms for item in request_metrics]
     total_kv_load_ms = sum(kv_load_values)
+    compute_wait_values = [item.compute_wait_ms for item in request_metrics]
+    kv_load_wait_values = [item.kv_load_wait_ms for item in request_metrics]
+    uncached_prefill_compute_values = [item.uncached_prefill_compute_ms for item in request_metrics]
+    total_compute_wait_ms = sum(compute_wait_values)
+    total_kv_load_wait_ms = sum(kv_load_wait_values)
+    total_uncached_prefill_compute_ms = sum(uncached_prefill_compute_values)
+    total_unattributed_ttft_ms = sum(item.unattributed_ttft_ms for item in request_metrics)
+    resolved_timeline_mode = _resolve_metric_string(
+        configured=timeline_mode,
+        values=tuple(item.timeline_mode for item in request_metrics)
+        + tuple(item.timeline_mode for item in iteration_metrics),
+        field_name="timeline_mode",
+    )
+    resolved_ttft_granularity = _resolve_metric_string(
+        configured=ttft_granularity,
+        values=tuple(item.ttft_granularity for item in request_metrics)
+        + tuple(item.ttft_granularity for item in iteration_metrics),
+        field_name="ttft_granularity",
+    )
     return CapacitySweepRow(
         hbm_capacity_blocks=capacity,
         scope=scope,
@@ -346,6 +402,48 @@ def _aggregate_row(
         p50_kv_load_ms=percentile(kv_load_values, 50),
         p90_kv_load_ms=percentile(kv_load_values, 90),
         p99_kv_load_ms=percentile(kv_load_values, 99),
+        timeline_mode=resolved_timeline_mode,
+        ttft_granularity=resolved_ttft_granularity,
+        total_compute_wait_ms=total_compute_wait_ms,
+        avg_compute_wait_ms=_safe_rate(total_compute_wait_ms, len(request_metrics)),
+        p50_compute_wait_ms=percentile(compute_wait_values, 50),
+        p90_compute_wait_ms=percentile(compute_wait_values, 90),
+        p99_compute_wait_ms=percentile(compute_wait_values, 99),
+        total_kv_load_wait_ms=total_kv_load_wait_ms,
+        avg_kv_load_wait_ms=_safe_rate(total_kv_load_wait_ms, len(request_metrics)),
+        p50_kv_load_wait_ms=percentile(kv_load_wait_values, 50),
+        p90_kv_load_wait_ms=percentile(kv_load_wait_values, 90),
+        p99_kv_load_wait_ms=percentile(kv_load_wait_values, 99),
+        total_uncached_prefill_compute_ms=total_uncached_prefill_compute_ms,
+        avg_uncached_prefill_compute_ms=_safe_rate(
+            total_uncached_prefill_compute_ms,
+            len(request_metrics),
+        ),
+        p90_uncached_prefill_compute_ms=percentile(uncached_prefill_compute_values, 90),
+        total_unattributed_ttft_ms=total_unattributed_ttft_ms,
+        avg_unattributed_ttft_ms=_safe_rate(
+            total_unattributed_ttft_ms,
+            len(request_metrics),
+        ),
+        total_chunk_count=sum(item.chunk_count for item in request_metrics),
+        total_load_event_count=sum(item.load_event_count for item in request_metrics),
+        total_progressive_materialized_blocks=sum(
+            item.progressive_materialized_blocks for item in request_metrics
+        ),
+        total_progressive_materialized_tokens=sum(
+            item.progressive_materialized_tokens for item in request_metrics
+        ),
+        total_waiting_for_compute_count=sum(
+            item.waiting_for_compute_count for item in iteration_metrics
+        ),
+        total_waiting_for_kv_load_count=sum(
+            item.waiting_for_kv_load_count for item in iteration_metrics
+        ),
+        total_scheduled_chunk_count=sum(item.scheduled_chunk_count for item in iteration_metrics),
+        max_kv_transfer_queue_depth=max(
+            (item.kv_transfer_queue_depth_max for item in iteration_metrics),
+            default=0,
+        ),
     )
 
 
@@ -358,6 +456,20 @@ def _safe_rate(numerator: float, denominator: int) -> float:
     if denominator <= 0:
         return 0.0
     return numerator / denominator
+
+
+def _resolve_metric_string(
+    *,
+    configured: str,
+    values: Sequence[str],
+    field_name: str,
+) -> str:
+    unique = {value for value in values if value}
+    if not unique:
+        return configured
+    if len(unique) != 1:
+        raise ValueError(f"capacity sweep {field_name} invariant failed: mixed values")
+    return next(iter(unique))
 
 
 def _mapping(parent: Mapping[str, Any], key: str) -> Mapping[str, Any]:

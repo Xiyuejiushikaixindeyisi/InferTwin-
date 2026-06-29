@@ -3,11 +3,15 @@ import pytest
 from infertwin.cache.hbm_lru import HBMCache
 from infertwin.cache.tiered import TieredPrefixCache
 from infertwin.config.model_runtime import ModelCacheDefaults, ModelCachePoolingDefaults
+from infertwin.replay.timeline import CHUNK_TTFT_GRANULARITY, PROGRESSIVE_TIMELINE_MODE
 from infertwin.streaming.cache_factory import (
+    CACHE_MODE_HBM_DDR_LRU_PROGRESSIVE_TIMELINE,
     CACHE_MODE_HBM_DDR_LRU,
     CACHE_MODE_HBM_LRU,
     build_streaming_cache_factory_config,
     build_streaming_prefix_cache,
+    timeline_mode_for_cache_mode,
+    ttft_granularity_for_timeline_mode,
 )
 
 
@@ -51,6 +55,28 @@ def test_explicit_hbm_ddr_mode_builds_tiered_cache() -> None:
     assert isinstance(cache, TieredPrefixCache)
     assert cache.stats.hbm_capacity_blocks == 2
     assert cache.stats.ddr_capacity_blocks == 8
+
+
+def test_progressive_timeline_mode_builds_tiered_cache_and_timeline_mode() -> None:
+    config = build_streaming_cache_factory_config(
+        {
+            "cache": {
+                "mode": CACHE_MODE_HBM_DDR_LRU_PROGRESSIVE_TIMELINE,
+                "eviction_policy": "lru",
+            }
+        }
+    )
+
+    cache = build_streaming_prefix_cache(
+        capacity=2,
+        instance_uuid="instance-a",
+        cache_defaults=_ddr_cache_defaults(ddr_capacity_blocks=8),
+        config=config,
+    )
+
+    assert isinstance(cache, TieredPrefixCache)
+    assert timeline_mode_for_cache_mode(config.mode) == PROGRESSIVE_TIMELINE_MODE
+    assert ttft_granularity_for_timeline_mode(PROGRESSIVE_TIMELINE_MODE) == (CHUNK_TTFT_GRANULARITY)
 
 
 def test_hbm_ddr_mode_requires_instance_cache_defaults() -> None:

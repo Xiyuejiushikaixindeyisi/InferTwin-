@@ -17,6 +17,7 @@ from infertwin.report.tables import write_csv_table
 
 _CACHE_MODE_HBM_LRU = "batch_aware_hbm_lru"
 _CACHE_MODE_HBM_DDR_LRU = "batch_aware_hbm_ddr_lru"
+_CACHE_MODE_HBM_DDR_LRU_PROGRESSIVE_TIMELINE = "batch_aware_hbm_ddr_lru_progressive_timeline"
 
 
 def write_capacity_sweep_report(
@@ -95,6 +96,29 @@ def write_capacity_sweep_summary(
             f"{row.cache_event_count} |"
         )
 
+    lines.extend(
+        [
+            "",
+            "## Timeline Results",
+            "",
+            "| hbm_capacity_blocks | timeline_mode | ttft_granularity | p90_compute_wait_ms | p90_kv_load_wait_ms | p90_uncached_prefill_compute_ms | total_chunk_count | total_progressive_materialized_tokens | max_kv_transfer_queue_depth |",
+            "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+        ]
+    )
+    for row in trace_rows:
+        lines.append(
+            "| "
+            f"{row.hbm_capacity_blocks} | "
+            f"{row.timeline_mode} | "
+            f"{row.ttft_granularity} | "
+            f"{row.p90_compute_wait_ms:.6f} | "
+            f"{row.p90_kv_load_wait_ms:.6f} | "
+            f"{row.p90_uncached_prefill_compute_ms:.6f} | "
+            f"{row.total_chunk_count} | "
+            f"{row.total_progressive_materialized_tokens} | "
+            f"{row.max_kv_transfer_queue_depth} |"
+        )
+
     latency_source_by_instance = config_details.get("latency_source_by_instance", {})
     if isinstance(latency_source_by_instance, Mapping) and latency_source_by_instance:
         lines.extend(
@@ -148,6 +172,17 @@ def _detail(config_details: Mapping[str, object], key: str) -> object:
 
 def _cache_assumption_lines(config_details: Mapping[str, object]) -> list[str]:
     cache_mode = config_details.get("streaming_cache_mode")
+    if cache_mode == _CACHE_MODE_HBM_DDR_LRU_PROGRESSIVE_TIMELINE:
+        return [
+            "- Finite instance-local HBM prefix cache.",
+            "- Finite instance-local DDR/CPU prefix cache is enabled.",
+            "- Progressive timeline mode is enabled for chunk-level TTFT accounting.",
+            "- Full miss blocks become visible after scheduled chunk finish.",
+            "- DDR KV load wait and compute wait are modeled as typed replay metrics.",
+            "- DDR hit promotion to HBM is not modeled.",
+            "- Cross-instance KV pooling is not modeled.",
+            "- HBM and DDR eviction policy: lru.",
+        ]
     if cache_mode == _CACHE_MODE_HBM_DDR_LRU:
         return [
             "- Finite instance-local HBM prefix cache.",

@@ -12,9 +12,21 @@ from infertwin.cache.eviction import LRUEvictor
 from infertwin.cache.hbm_lru import HBMCache
 from infertwin.cache.tiered import TieredPrefixCache
 from infertwin.config.model_runtime import ModelCacheDefaults
+from infertwin.replay.timeline import (
+    CHUNK_TTFT_GRANULARITY,
+    ITERATION_TTFT_GRANULARITY,
+    LEGACY_TIMELINE_MODE,
+    PROGRESSIVE_TIMELINE_MODE,
+)
 
 CACHE_MODE_HBM_LRU = "batch_aware_hbm_lru"
 CACHE_MODE_HBM_DDR_LRU = "batch_aware_hbm_ddr_lru"
+CACHE_MODE_HBM_DDR_LRU_PROGRESSIVE_TIMELINE = PROGRESSIVE_TIMELINE_MODE
+CACHE_MODES = (
+    CACHE_MODE_HBM_LRU,
+    CACHE_MODE_HBM_DDR_LRU,
+    CACHE_MODE_HBM_DDR_LRU_PROGRESSIVE_TIMELINE,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,11 +73,8 @@ def build_streaming_cache_factory_config(
         raise ValueError("streaming replay only supports legacy cache.policy: hbm")
     if not mode:
         mode = CACHE_MODE_HBM_LRU
-    if mode not in (CACHE_MODE_HBM_LRU, CACHE_MODE_HBM_DDR_LRU):
-        raise ValueError(
-            "streaming replay cache.mode must be one of: "
-            f"{CACHE_MODE_HBM_LRU}, {CACHE_MODE_HBM_DDR_LRU}"
-        )
+    if mode not in CACHE_MODES:
+        raise ValueError(f"streaming replay cache.mode must be one of: {', '.join(CACHE_MODES)}")
 
     return StreamingCacheFactoryConfig(mode=mode, eviction_policy=eviction_policy)
 
@@ -88,7 +97,10 @@ def build_streaming_prefix_cache(
 
     if config.mode == CACHE_MODE_HBM_LRU:
         return HBMCache(capacity_blocks=capacity, evictor=LRUEvictor())
-    if config.mode == CACHE_MODE_HBM_DDR_LRU:
+    if config.mode in (
+        CACHE_MODE_HBM_DDR_LRU,
+        CACHE_MODE_HBM_DDR_LRU_PROGRESSIVE_TIMELINE,
+    ):
         _require_ddr_defaults(instance_uuid=instance_uuid, cache_defaults=cache_defaults)
         ddr_capacity_blocks = cache_defaults.ddr_capacity_blocks
         if ddr_capacity_blocks is None:
@@ -105,6 +117,26 @@ def build_streaming_prefix_cache(
         )
 
     raise ValueError(f"unsupported streaming cache mode {config.mode!r}")
+
+
+def timeline_mode_for_cache_mode(cache_mode: str) -> str:
+    """Return the replay timeline mode implied by a streaming cache mode."""
+
+    if cache_mode == CACHE_MODE_HBM_DDR_LRU_PROGRESSIVE_TIMELINE:
+        return PROGRESSIVE_TIMELINE_MODE
+    if cache_mode in (CACHE_MODE_HBM_LRU, CACHE_MODE_HBM_DDR_LRU):
+        return LEGACY_TIMELINE_MODE
+    raise ValueError(f"unsupported streaming cache mode {cache_mode!r}")
+
+
+def ttft_granularity_for_timeline_mode(timeline_mode: str) -> str:
+    """Return the TTFT granularity associated with a replay timeline mode."""
+
+    if timeline_mode == PROGRESSIVE_TIMELINE_MODE:
+        return CHUNK_TTFT_GRANULARITY
+    if timeline_mode == LEGACY_TIMELINE_MODE:
+        return ITERATION_TTFT_GRANULARITY
+    raise ValueError(f"unsupported timeline_mode {timeline_mode!r}")
 
 
 def _require_ddr_defaults(

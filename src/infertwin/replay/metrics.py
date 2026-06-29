@@ -12,6 +12,7 @@ from infertwin.instance.request import SimulationRequest
 from infertwin.latency.schema import LatencyResult
 from infertwin.request.block_hasher import PrefixBlock
 from infertwin.replay.timeline import (
+    CHUNK_TTFT_GRANULARITY,
     ITERATION_TTFT_GRANULARITY,
     LEGACY_TIMELINE_MODE,
     PROGRESSIVE_TIMELINE_MODE,
@@ -234,10 +235,12 @@ def build_iteration_metrics(
 ) -> IterationMetrics:
     breakdown = latency_breakdown_from_result(latency)
     scheduled_chunk_count = 0
+    ttft_granularity = ITERATION_TTFT_GRANULARITY
     if timeline_mode == PROGRESSIVE_TIMELINE_MODE:
         scheduled_chunk_count = sum(
             1 for item in shape.request_slices if item.scheduled_prefill_tokens > 0
         )
+        ttft_granularity = CHUNK_TTFT_GRANULARITY
     return IterationMetrics(
         instance_uuid=shape.instance_uuid,
         iteration_id=shape.iteration_id,
@@ -260,6 +263,7 @@ def build_iteration_metrics(
         prefill_compute_ms=breakdown.prefill_compute_ms,
         queue_ms=breakdown.queue_ms,
         timeline_mode=timeline_mode,
+        ttft_granularity=ttft_granularity,
         waiting_for_compute_count=waiting_for_compute_count,
         waiting_for_kv_load_count=waiting_for_kv_load_count,
         scheduled_chunk_count=scheduled_chunk_count,
@@ -314,13 +318,9 @@ def split_iteration_latency_contributions(
 
         kv_load_ms = 0.0
         if total_kv_load_bytes > 0 and request_slice.kv_load_bytes > 0:
-            kv_load_ms = (
-                breakdown.kv_load_ms * request_slice.kv_load_bytes / total_kv_load_bytes
-            )
+            kv_load_ms = breakdown.kv_load_ms * request_slice.kv_load_bytes / total_kv_load_bytes
         elif total_kv_load_tokens > 0 and request_slice.kv_load_tokens > 0:
-            kv_load_ms = (
-                breakdown.kv_load_ms * request_slice.kv_load_tokens / total_kv_load_tokens
-            )
+            kv_load_ms = breakdown.kv_load_ms * request_slice.kv_load_tokens / total_kv_load_tokens
 
         queue_ms = breakdown.queue_ms / batch_size if batch_size > 0 else 0.0
         contributions[request_slice.request_id] = IterationLatencyBreakdown(

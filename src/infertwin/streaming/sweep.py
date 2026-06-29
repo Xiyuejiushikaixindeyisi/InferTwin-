@@ -30,8 +30,11 @@ from infertwin.scheduler.config import SchedulerConfig
 from infertwin.scheduler.vllm_like import VllmLikeBatchScheduler
 from infertwin.streaming.build import StreamingBuildResult, StreamingRequestShardBuilder
 from infertwin.streaming.cache_factory import (
+    CACHE_MODE_HBM_DDR_LRU_PROGRESSIVE_TIMELINE,
     build_streaming_cache_factory_config,
     build_streaming_prefix_cache,
+    timeline_mode_for_cache_mode,
+    ttft_granularity_for_timeline_mode,
 )
 from infertwin.streaming.metrics import CapacitySweepStreamingMetricAggregator
 from infertwin.streaming.replay import StreamingBatchAwareReplayEngine
@@ -60,6 +63,8 @@ class StreamingCapacitySweepRunner:
         )
         self.streaming_config = build_streaming_capacity_sweep_config(config)
         self.cache_factory_config = build_streaming_cache_factory_config(config)
+        self.timeline_mode = timeline_mode_for_cache_mode(self.cache_factory_config.mode)
+        self.ttft_granularity = ttft_granularity_for_timeline_mode(self.timeline_mode)
         self.latency_resolver = build_instance_latency_backend_resolver(config)
         self.runtime_resolver = _build_optional_instance_runtime_resolver(config)
         self.scheduler_config = build_scheduler_config_from_config(config)
@@ -111,7 +116,10 @@ class StreamingCapacitySweepRunner:
         build_result: StreamingBuildResult,
         cache_event_sink: CacheEventSink,
     ) -> tuple[CapacitySweepRow, ...]:
-        aggregator = CapacitySweepStreamingMetricAggregator()
+        aggregator = CapacitySweepStreamingMetricAggregator(
+            timeline_mode=self.timeline_mode,
+            ttft_granularity=self.ttft_granularity,
+        )
 
         for shard in build_result.manifest.shards:
             engine = _build_streaming_replay_engine(
@@ -119,6 +127,7 @@ class StreamingCapacitySweepRunner:
                 default_scheduler_config=self.scheduler_config,
                 runtime_resolver=self.runtime_resolver,
                 latency_resolver=self.latency_resolver,
+                timeline_mode=self.timeline_mode,
             )
             cache_defaults = _default_cache_for_instance(
                 instance_uuid=shard.instance_uuid,
@@ -178,6 +187,11 @@ class StreamingCapacitySweepRunner:
             "hardware_name": _required_str(latency_config, "hardware_name"),
             "streaming_cache_mode": self.cache_factory_config.mode,
             "streaming_cache_eviction_policy": self.cache_factory_config.eviction_policy,
+            "streaming_timeline_mode": self.timeline_mode,
+            "streaming_ttft_granularity": self.ttft_granularity,
+            "progressive_materialization_enabled": (
+                self.cache_factory_config.mode == CACHE_MODE_HBM_DDR_LRU_PROGRESSIVE_TIMELINE
+            ),
             "eviction_policy": "lru",
             "instance_latency_enabled": self.latency_resolver.uses_instance_profiles,
             "instance_latency_profile_path": str(self.latency_resolver.profile_path or ""),
@@ -211,6 +225,7 @@ def _build_streaming_replay_engine(
     default_scheduler_config: SchedulerConfig,
     runtime_resolver: InstanceRuntimeResolver | None,
     latency_resolver: InstanceLatencyBackendResolver,
+    timeline_mode: str,
 ) -> StreamingBatchAwareReplayEngine:
     runtime_profile = _runtime_profile_for_instance(
         instance_uuid=instance_uuid,
@@ -224,6 +239,7 @@ def _build_streaming_replay_engine(
     return StreamingBatchAwareReplayEngine(
         scheduler=VllmLikeBatchScheduler(scheduler_config),
         latency_backend=latency_resolver.backend_for(instance_uuid),
+        timeline_mode=timeline_mode,
     )
 
 
