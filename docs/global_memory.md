@@ -116,7 +116,23 @@ InferTwin 必须区分核心仿真器和外围能力。
 当前阶段：
 
 ```text
-Step9 已完成并归档；当前准备进入 StepY。StepY 的产品形态和技术路线尚未定义，进入前必须重新声明本阶段属于核心仿真器还是外围能力。
+V1 核心仿真器验收记录已形成，下一阶段开发重点是 HitFloor 外围能力。pre_hitfloor 当前整体 pending，不归档；其中 prefix cache hit 与 TTFT modeling 文档保留为 HitFloor 方案设计的重要参考。HitFloor 属于外围能力，只能消费核心仿真器 typed result，不得重算 replay 语义。
+```
+
+V1 交接、验收、对比和误差文档集中在：
+
+```text
+docs/V1/infertwin_v1_handoff.md
+docs/V1/infertwin_v1_acceptance.md
+docs/V1/infertwin_v1_vs_real_serving_comparison.md
+docs/V1/infertwin_v1_error_analysis.md
+```
+
+V1 验收遗留问题总排序入口：
+
+```text
+docs/V1/infertwin_v1_acceptance.md
+section: 10. 遗留问题总排序：面向 HitFloor 下一阶段
 ```
 
 Step7 归档与 review：
@@ -194,7 +210,7 @@ git diff --check: passed
 Step9 收口结论：
 
 ```text
-具备进入 StepY 产品形态和技术路线讨论的条件。
+V1 验收后，下一阶段重点已调整为 HitFloor 外围能力；进入代码开发前必须先确认 HitFloor 前置条件、产品范围、验收标准和风险控制。
 ```
 
 Step9 完成内容：
@@ -564,6 +580,7 @@ docs/global_memory.md
 docs/code_development_requirements.md
 docs/infertwin_product_design.md
 docs/core_simulator_technical_plan.md
+docs/V1/infertwin_v1_acceptance.md
 ```
 
 notes 索引：
@@ -749,9 +766,61 @@ docs/archive/step6/03_acceptance_e2e.md
 
 Step9 收口后的待开发项必须按类型处理，不得把未实现能力写成已实现，也不得把外围能力写成核心仿真器。
 
+下一阶段开发重点是 HitFloor 外围能力。后续 agent 进入开发前，应优先读取：
+
+```text
+docs/V1/infertwin_v1_acceptance.md
+section 10. 遗留问题总排序：面向 HitFloor 下一阶段
+```
+
+面向 HitFloor 的遗留问题总排序：
+
+1. 开发 HitFloor 的前置条件。
+2. 开发 HitFloor。
+3. HitFloor 之后的仿真器设计。
+
+开发 HitFloor 的前置条件：
+
+- HF-Pre-P0：pooling mode 显式化与 ConfigGuard。当前 V1 隐含 `pooling_mode=write_through_on_materialization`；HitFloor 必须显式展示 pooling mode，未实现模式如 `hbm_evict_offload_ddr` 应 fail-fast。
+- HF-Pre-P0：KV load service/wait 指标显式化。报告中应明确 `kv_load_service_ms = kv_load_ms`，`kv_load_total_ms = kv_load_service_ms + kv_load_wait_ms`。
+- HF-Pre-P0：DDR load profile guard / calibration knobs。DDR-heavy 场景下 TTFT 主要受 KV load profile 影响；缺失校准时必须标注 `uncalibrated` 或使用 conservative default。
+- HF-Pre-P0：active KV occupancy-aware HBM capacity。高并发 running requests 的 active KV 会占用 HBM，应支持 `effective_hbm_prefix_capacity(t) = total_hbm_kv_blocks - active_running_blocks(t) - reserved_blocks` 的轻量近似。
+- HF-Pre-P1：runtime block size / tokenizer / chat template parity check。HitFloor 主要依赖 prefix cache hit，配置错会直接导致 hit 失真。
+
+开发 HitFloor：
+
+- HF-P0：tier-aware HitFloor schema。必须输出 HBM hit、DDR hit、miss、KV load service/wait/total 和 P90 TTFT；不得只输出 total hit rate。
+- HF-P0：capacity / concurrency / request length sweep。围绕 request length bucket、peak concurrency、HBM/DDR capacity、tier hit rate、miss rate 和 TTFT components 产出 long-format 表。
+- HF-P0：DDR hit 收益解释。必须解释 `saved_compute_ms` 与 `kv_load_service_ms + kv_load_wait_ms` 的关系，不能默认 DDR hit 一定有收益。
+- HF-P1：HitFloor summary / report。输出 CSV 和 summary.md，明确 TTFT profile 是否 calibrated、pooling mode、当前不建模 remote pooling / real TransferEngine / decode。
+- HF-P1：HitFloor 不做的事情。不得在外围能力中重算 prefix hit、TTFT 或 replay ordering；不得混入 gateway routing 或真实 physical KV memory pressure 结论。
+
+HitFloor 之后的仿真器设计：
+
+- Sim-P0：`hbm_evict_offload_ddr` backend。如果目标部署依赖 HBM eviction 后 offload 到 DDR，应新增 offload event、completion timing、DDR visible-after-offload 和 store/offload bandwidth。
+- Sim-P1：DDR load completion / promotion policy。
+- Sim-P1：load-vs-recompute policy。
+- Sim-P1：store/offload bandwidth accounting。
+- Sim-P2：真实 KV transfer timeline backend。
+- Sim-P2：Mooncake / TransferEngine adapter。
+- Sim-P2：compute / transfer overlap backend。
+- Sim-P3：physical KV slot backend。
+- Sim-P3：Decode / TPOT / deployment-aware batch latency。
+- Sim-P3：Hybrid / sparse attention cache manager。
+
+优先路线：
+
+```text
+pooling mode guard
+-> kv_load service/wait 显式化
+-> DDR load profile guard
+-> active KV occupancy-aware HBM capacity
+-> HitFloor tier-aware schema/report
+```
+
 V1 必须完成：
 
-- 当前 V1 必须完成项已完成。进入 StepY 前仍需重新定义阶段范围、验收标准和风险控制。
+- 当前 V1 必须完成项已完成。下一阶段为 HitFloor 外围能力；进入代码开发前仍需重新定义产品范围、验收标准和风险控制。
 
 V2 核心仿真器待开发：
 
